@@ -1,0 +1,240 @@
+import { v3add, v3scale, vec3 } from './math.js';
+
+function tri(a, b, c, color) { return [a, b, c, color]; }
+
+function rotY(p, angle) {
+  const c = Math.cos(angle), s = Math.sin(angle);
+  return [p[0]*c + p[2]*s, p[1], -p[0]*s + p[2]*c];
+}
+
+function translate(tris, offset) {
+  return tris.map(([a, b, c, col]) => [v3add(a, offset), v3add(b, offset), v3add(c, offset), col]);
+}
+
+function rotateTrisY(tris, angle) {
+  return tris.map(([a, b, c, col]) => [rotY(a, angle), rotY(b, angle), rotY(c, angle), col]);
+}
+
+function scaleTris(tris, s) {
+  const sv = typeof s === 'number' ? [s,s,s] : s;
+  return tris.map(([a, b, c, col]) => [
+    [a[0]*sv[0], a[1]*sv[1], a[2]*sv[2]],
+    [b[0]*sv[0], b[1]*sv[1], b[2]*sv[2]],
+    [c[0]*sv[0], c[1]*sv[1], c[2]*sv[2]], col
+  ]);
+}
+
+function quad(a, b, c, d, color) {
+  return [tri(a, b, c, color), tri(a, c, d, color)];
+}
+
+function boxTris(cx, cy, cz, sx, sy, sz, color) {
+  const r = [];
+  const hx = sx/2, hy = sy/2, hz = sz/2;
+  const v = (x,y,z) => [cx+x, cy+y, cz+z];
+  r.push(...quad(v(-hx,hy,-hz), v(hx,hy,-hz), v(hx,hy,hz), v(-hx,hy,hz), color));
+  r.push(...quad(v(-hx,-hy,hz), v(hx,-hy,hz), v(hx,-hy,-hz), v(-hx,-hy,-hz), color));
+  r.push(...quad(v(-hx,-hy,-hz), v(-hx,hy,-hz), v(-hx,hy,hz), v(-hx,-hy,hz), color));
+  r.push(...quad(v(hx,-hy,hz), v(hx,hy,hz), v(hx,hy,-hz), v(hx,-hy,-hz), color));
+  r.push(...quad(v(-hx,-hy,hz), v(-hx,hy,hz), v(hx,hy,hz), v(hx,-hy,hz), color));
+  r.push(...quad(v(hx,-hy,-hz), v(hx,hy,-hz), v(-hx,hy,-hz), v(-hx,-hy,-hz), color));
+  return r;
+}
+
+function coneTris(cx, cy, cz, radius, height, sides, color) {
+  const r = [];
+  const top = [cx, cy + height, cz];
+  for (let i = 0; i < sides; i++) {
+    const a1 = (i / sides) * Math.PI * 2;
+    const a2 = ((i+1) / sides) * Math.PI * 2;
+    const b1 = [cx + Math.cos(a1)*radius, cy, cz + Math.sin(a1)*radius];
+    const b2 = [cx + Math.cos(a2)*radius, cy, cz + Math.sin(a2)*radius];
+    r.push(tri(b2, b1, top, color));
+  }
+  return r;
+}
+
+function pyramidTris(cx, cy, cz, radius, height, sides, color) {
+  const r = [];
+  const top = [cx, cy + height, cz];
+  for (let i = 0; i < sides; i++) {
+    const a1 = (i / sides) * Math.PI * 2;
+    const a2 = ((i+1) / sides) * Math.PI * 2;
+    const b1 = [cx + Math.cos(a1)*radius, cy, cz + Math.sin(a1)*radius];
+    const b2 = [cx + Math.cos(a2)*radius, cy, cz + Math.sin(a2)*radius];
+    r.push(tri(b2, b1, top, color));
+    r.push(tri(b1, b2, [cx, cy, cz], color));
+  }
+  return r;
+}
+
+const TRUNK_BROWN = [0.35, 0.22, 0.12];
+const TRUNK_DARK = [0.28, 0.17, 0.09];
+
+const PINE_DARK = [0.18, 0.32, 0.15];
+const PINE_MID = [0.22, 0.38, 0.18];
+const PINE_LIGHT = [0.28, 0.42, 0.2];
+
+const BUSH_GREEN = [0.25, 0.4, 0.18];
+const BUSH_DARK = [0.18, 0.3, 0.12];
+
+const FLOWER_CREAM = [0.95, 0.9, 0.7];
+const FLOWER_PINK = [0.85, 0.5, 0.55];
+const FLOWER_GOLD = [0.9, 0.75, 0.3];
+const FLOWER_RED = [0.75, 0.3, 0.25];
+
+const ROCK_GREY = [0.5, 0.48, 0.44];
+const ROCK_DARK = [0.38, 0.36, 0.33];
+
+const STUMP_COLOR = [0.4, 0.28, 0.15];
+const LOG_COLOR = [0.38, 0.25, 0.13];
+
+const GRASS_GREEN = [0.3, 0.48, 0.2];
+const GRASS_DARK = [0.22, 0.38, 0.15];
+
+export function makeTreeA(x, y, z, scale = 1, rot = 0) {
+  let tris = [];
+  const h = 1.8 * scale;
+  tris.push(...boxTris(0, h*0.3, 0, 0.25*scale, h*0.6, 0.25*scale, TRUNK_BROWN));
+  tris.push(...coneTris(0, h*0.45, 0, 1.4*scale, 1.8*scale, 6, PINE_DARK));
+  tris.push(...coneTris(0, h*0.75, 0, 1.1*scale, 1.5*scale, 6, PINE_MID));
+  tris.push(...coneTris(0, h*1.05, 0, 0.75*scale, 1.1*scale, 6, PINE_LIGHT));
+  tris = rotateTrisY(tris, rot);
+  return translate(tris, [x, y, z]);
+}
+
+export function makeTreeB(x, y, z, scale = 1, rot = 0) {
+  let tris = [];
+  const h = 2.2 * scale;
+  tris.push(...boxTris(0, h*0.25, 0, 0.3*scale, h*0.5, 0.3*scale, TRUNK_DARK));
+  tris.push(...pyramidTris(0.15*scale, h*0.4, 0.1*scale, 1.6*scale, 2.0*scale, 5, PINE_DARK));
+  tris.push(...pyramidTris(-0.1*scale, h*0.8, -0.05*scale, 1.2*scale, 1.6*scale, 5, PINE_MID));
+  tris.push(...pyramidTris(0.05*scale, h*1.15, 0, 0.8*scale, 1.0*scale, 5, PINE_LIGHT));
+  tris = rotateTrisY(tris, rot);
+  return translate(tris, [x, y, z]);
+}
+
+export function makeTreeC(x, y, z, scale = 1, rot = 0) {
+  let tris = [];
+  const h = 1.5 * scale;
+  tris.push(...boxTris(0, h*0.35, 0, 0.2*scale, h*0.7, 0.2*scale, TRUNK_BROWN));
+  tris.push(...coneTris(0, h*0.5, 0, 1.0*scale, 2.5*scale, 7, PINE_DARK));
+  tris.push(...coneTris(0, h*1.0, 0, 0.65*scale, 1.5*scale, 7, PINE_MID));
+  tris = rotateTrisY(tris, rot);
+  return translate(tris, [x, y, z]);
+}
+
+export function makeBush(x, y, z, scale = 1, rot = 0) {
+  let tris = [];
+  const c = scale > 0.7 ? BUSH_GREEN : BUSH_DARK;
+  tris.push(...pyramidTris(0, 0, 0, 0.6*scale, 0.5*scale, 5, c));
+  tris.push(...pyramidTris(0.2*scale, 0, 0.15*scale, 0.45*scale, 0.4*scale, 5, BUSH_GREEN));
+  tris = rotateTrisY(tris, rot);
+  return translate(tris, [x, y, z]);
+}
+
+export function makeFlowerPatch(x, y, z, count = 5, spread = 0.6, seed = 0) {
+  const tris = [];
+  const colors = [FLOWER_CREAM, FLOWER_PINK, FLOWER_GOLD, FLOWER_RED];
+  for (let i = 0; i < count; i++) {
+    const a = (seed + i * 137.5) * 0.0174533;
+    const r = spread * (0.3 + 0.7 * ((Math.sin(seed + i * 7.3) + 1) / 2));
+    const fx = x + Math.cos(a) * r;
+    const fz = z + Math.sin(a) * r;
+    const col = colors[(i + Math.floor(seed)) % colors.length];
+    const s = 0.08 + 0.06 * Math.sin(seed + i);
+    tris.push(...pyramidTris(fx, y, fz, s, s * 1.2, 4, col));
+    tris.push(...boxTris(fx, y + s*0.3, fz, 0.015, s*0.8, 0.015, GRASS_DARK));
+  }
+  return tris;
+}
+
+export function makeGrassClump(x, y, z, count = 6, spread = 0.4, seed = 0) {
+  const tris = [];
+  for (let i = 0; i < count; i++) {
+    const a = (seed + i * 60) * 0.0174533;
+    const r = spread * (0.3 + 0.7 * Math.abs(Math.sin(seed + i * 3.7)));
+    const gx = x + Math.cos(a) * r;
+    const gz = z + Math.sin(a) * r;
+    const h = 0.15 + 0.1 * Math.sin(seed + i * 2.3);
+    const c = i % 2 === 0 ? GRASS_GREEN : GRASS_DARK;
+    tris.push(tri([gx-0.02, y, gz], [gx+0.02, y, gz], [gx, y+h, gz+0.01], c));
+    tris.push(tri([gx, y, gz-0.02], [gx, y, gz+0.02], [gx+0.01, y+h*0.9, gz], c));
+  }
+  return tris;
+}
+
+export function makeRock(x, y, z, scale = 1, rot = 0) {
+  let tris = [];
+  const c = scale > 0.5 ? ROCK_GREY : ROCK_DARK;
+  tris.push(...pyramidTris(0, 0, 0, 0.35*scale, 0.25*scale, 5, c));
+  tris.push(...pyramidTris(0.1*scale, 0, 0.08*scale, 0.2*scale, 0.18*scale, 4, ROCK_DARK));
+  tris = rotateTrisY(tris, rot);
+  return translate(tris, [x, y, z]);
+}
+
+export function makeStump(x, y, z, scale = 1) {
+  let tris = [];
+  tris.push(...coneTris(0, 0, 0, 0.25*scale, 0.35*scale, 6, STUMP_COLOR));
+  tris.push(...coneTris(0, 0.1*scale, 0, 0.28*scale, 0.05*scale, 6, TRUNK_DARK));
+  return translate(tris, [x, y, z]);
+}
+
+export function makeLog(x, y, z, length = 1.2, scale = 0.8, rot = 0) {
+  let tris = [];
+  const r = 0.12 * scale;
+  const hl = length / 2;
+  const sides = 5;
+  for (let i = 0; i < sides; i++) {
+    const a1 = (i / sides) * Math.PI * 2;
+    const a2 = ((i+1) / sides) * Math.PI * 2;
+    const y1 = r + Math.cos(a1)*r, z1 = Math.sin(a1)*r;
+    const y2 = r + Math.cos(a2)*r, z2 = Math.sin(a2)*r;
+    tris.push(...quad(
+      [-hl, y1, z1], [hl, y1, z1], [hl, y2, z2], [-hl, y2, z2], LOG_COLOR
+    ));
+  }
+  tris.push(...coneTris(-hl, 0, 0, r, r*0.01, sides, TRUNK_DARK));
+  tris.push(...coneTris(hl, 0, 0, r, r*0.01, sides, STUMP_COLOR));
+  tris = rotateTrisY(tris, rot);
+  return translate(tris, [x, y, z]);
+}
+
+export function makeGroundPatch(cx, cz, sizeX, sizeZ, yFunc, color) {
+  const tris = [];
+  const res = 2;
+  const stepX = sizeX / res;
+  const stepZ = sizeZ / res;
+  const x0 = cx - sizeX/2;
+  const z0 = cz - sizeZ/2;
+  for (let i = 0; i < res; i++) {
+    for (let j = 0; j < res; j++) {
+      const ax = x0 + i * stepX, az = z0 + j * stepZ;
+      const bx = ax + stepX, bz = az + stepZ;
+      const ay = yFunc(ax, az), by = yFunc(bx, az), cy = yFunc(bx, bz), dy = yFunc(ax, bz);
+      const c = [color[0] + (Math.sin(i*3+j*7)*0.02), color[1] + (Math.cos(i*5+j*3)*0.02), color[2]];
+      tris.push(tri([ax, ay, az], [bx, cy, bz], [bx, by, az], c));
+      tris.push(tri([ax, ay, az], [ax, dy, bz], [bx, cy, bz], c));
+    }
+  }
+  return tris;
+}
+
+export function makeShadowPatch(x, y, z, radius) {
+  const tris = [];
+  const c = [0.15, 0.18, 0.1];
+  const segs = 5;
+  for (let i = 0; i < segs; i++) {
+    const a1 = (i / segs) * Math.PI * 2;
+    const a2 = ((i+1) / segs) * Math.PI * 2;
+    tris.push(tri(
+      [x, y + 0.01, z],
+      [x + Math.cos(a2)*radius, y + 0.01, z + Math.sin(a2)*radius],
+      [x + Math.cos(a1)*radius, y + 0.01, z + Math.sin(a1)*radius],
+      c
+    ));
+  }
+  return tris;
+}
+
+export { translate, rotateTrisY, scaleTris };
