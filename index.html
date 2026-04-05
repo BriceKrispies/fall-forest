@@ -2,13 +2,17 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Fall Forest</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <canvas id="canvas"></canvas>
 <div id="hint">Click to enter · W/S or ↑/↓ to walk · Mouse to look</div>
+<div id="touch-controls">
+  <button id="btn-fwd" aria-label="Forward">&#9650;</button>
+  <button id="btn-back" aria-label="Backward">&#9660;</button>
+</div>
 <script type="module" src="src/main.js"></script>
 </body>
 </html>

@@ -1,4 +1,4 @@
-import { v3sub, v3cross, v3norm, v3dot, projectPoint, mat4multiply, mat4perspective, mat4lookAt, clamp, lerp, smoothstep } from './math.js';
+import { v3sub, v3cross, v3norm, v3dot, v3add, v3scale, projectPoint, mat4multiply, mat4perspective, mat4lookAt, clamp, lerp, smoothstep } from './math.js';
 
 const SUN_DIR = v3norm([0.4, 0.8, 0.3]);
 const SUN_WARM = [1.0, 0.92, 0.75];
@@ -59,6 +59,38 @@ export class Renderer {
 
   endFrame() {
     this.ctx.putImageData(this.img, 0, 0);
+  }
+
+  drawSun() {
+    const sunWorld = v3add(this.camPos, v3scale(SUN_DIR, 60));
+    const sp = projectPoint(this.mvp, sunWorld, this.hw, this.hh);
+    if (!sp) return;
+    const sx = sp[0], sy = sp[1];
+    const r1 = 8, r2 = 14;
+    const pixels = this.pixels;
+    const w = this.w, h = this.h;
+    const coreR = 255, coreG = 248, coreB = 220;
+    const glowR = 255, glowG = 230, glowB = 180;
+    for (let y = Math.max(0, Math.floor(sy - r2)); y <= Math.min(h - 1, Math.ceil(sy + r2)); y++) {
+      for (let x = Math.max(0, Math.floor(sx - r2)); x <= Math.min(w - 1, Math.ceil(sx + r2)); x++) {
+        const dx = x - sx, dy = y - sy;
+        const d = Math.sqrt(dx*dx + dy*dy);
+        if (d > r2) continue;
+        const idx = (y * w + x) * 4;
+        if (d < r1) {
+          const t = d / r1;
+          pixels[idx] = lerp(coreR, glowR, t) | 0;
+          pixels[idx+1] = lerp(coreG, glowG, t) | 0;
+          pixels[idx+2] = lerp(coreB, glowB, t) | 0;
+        } else {
+          const t = (d - r1) / (r2 - r1);
+          const a = 1 - t * t;
+          pixels[idx] = lerp(pixels[idx], glowR, a * 0.5) | 0;
+          pixels[idx+1] = lerp(pixels[idx+1], glowG, a * 0.5) | 0;
+          pixels[idx+2] = lerp(pixels[idx+2], glowB, a * 0.4) | 0;
+        }
+      }
+    }
   }
 
   drawMesh(tris) {
