@@ -1,4 +1,5 @@
 import { v3add, v3scale, vec3 } from './math.js';
+import { SUN_DIR } from './renderer.js';
 
 function tri(a, b, c, color) { return [a, b, c, color]; }
 
@@ -91,6 +92,109 @@ const LOG_COLOR = [0.38, 0.25, 0.13];
 
 const GRASS_GREEN = [0.3, 0.48, 0.2];
 const GRASS_DARK = [0.22, 0.38, 0.15];
+
+const SHADOW_DARK = [0.1, 0.12, 0.08];
+const SHADOW_MID = [0.12, 0.15, 0.09];
+const CONTACT_DARK = [0.08, 0.09, 0.06];
+
+const SUN_FLAT_X = -SUN_DIR[0] / SUN_DIR[1];
+const SUN_FLAT_Z = -SUN_DIR[2] / SUN_DIR[1];
+
+function shadowEllipse(cx, gy, cz, rx, rz, segs, color) {
+  const tris = [];
+  const y = gy + 0.015;
+  for (let i = 0; i < segs; i++) {
+    const a1 = (i / segs) * Math.PI * 2;
+    const a2 = ((i+1) / segs) * Math.PI * 2;
+    tris.push(tri(
+      [cx, y, cz],
+      [cx + Math.cos(a2)*rx, y, cz + Math.sin(a2)*rz],
+      [cx + Math.cos(a1)*rx, y, cz + Math.sin(a1)*rz],
+      color
+    ));
+  }
+  return tris;
+}
+
+function makeContactShadow(x, gy, z, radius) {
+  return shadowEllipse(x, gy, z, radius, radius, 6, CONTACT_DARK);
+}
+
+function makeTreeShadow(x, gy, z, height, canopyRadius, scale) {
+  const tris = [];
+  const offsetX = height * SUN_FLAT_X * 0.7 * scale;
+  const offsetZ = height * SUN_FLAT_Z * 0.7 * scale;
+  const sx = x + offsetX * 0.5;
+  const sz = z + offsetZ * 0.5;
+  const len = Math.sqrt(offsetX*offsetX + offsetZ*offsetZ);
+  const rx = Math.max(canopyRadius * scale * 0.6, len * 0.35 + 0.3);
+  const rz = canopyRadius * scale * 0.55;
+  const angle = Math.atan2(offsetZ, offsetX);
+  const segs = 6;
+  const y = gy + 0.015;
+  for (let i = 0; i < segs; i++) {
+    const a1 = (i / segs) * Math.PI * 2;
+    const a2 = ((i+1) / segs) * Math.PI * 2;
+    tris.push(tri(
+      [sx, y, sz],
+      [sx + Math.cos(a2 + angle)*rx, y, sz + Math.sin(a2 + angle)*rz],
+      [sx + Math.cos(a1 + angle)*rx, y, sz + Math.sin(a1 + angle)*rz],
+      SHADOW_MID
+    ));
+  }
+  tris.push(...makeContactShadow(x, gy, z, 0.3 * scale));
+  return tris;
+}
+
+function makeRockShadow(x, gy, z, scale) {
+  const offsetX = 0.3 * scale * SUN_FLAT_X;
+  const offsetZ = 0.3 * scale * SUN_FLAT_Z;
+  const sx = x + offsetX * 0.5;
+  const sz = z + offsetZ * 0.5;
+  const tris = shadowEllipse(sx, gy, sz, 0.3 * scale, 0.22 * scale, 5, SHADOW_MID);
+  tris.push(...makeContactShadow(x, gy, z, 0.15 * scale));
+  return tris;
+}
+
+function makeStumpShadow(x, gy, z, scale) {
+  const offsetX = 0.35 * scale * SUN_FLAT_X;
+  const offsetZ = 0.35 * scale * SUN_FLAT_Z;
+  const sx = x + offsetX * 0.5;
+  const sz = z + offsetZ * 0.5;
+  const tris = shadowEllipse(sx, gy, sz, 0.3 * scale, 0.2 * scale, 5, SHADOW_MID);
+  tris.push(...makeContactShadow(x, gy, z, 0.2 * scale));
+  return tris;
+}
+
+function makeLogShadow(x, gy, z, length, scale, rot) {
+  const tris = [];
+  const y = gy + 0.015;
+  const offsetX = 0.15 * scale * SUN_FLAT_X;
+  const offsetZ = 0.15 * scale * SUN_FLAT_Z;
+  const hw = length * 0.5;
+  const hh = 0.18 * scale;
+  const cr = Math.cos(rot), sr = Math.sin(rot);
+  const pts = [
+    [-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]
+  ].map(([lx, lz]) => [
+    x + offsetX + lx * cr - lz * sr,
+    z + offsetZ + lx * sr + lz * cr
+  ]);
+  tris.push(tri([pts[0][0], y, pts[0][1]], [pts[2][0], y, pts[2][1]], [pts[1][0], y, pts[1][1]], SHADOW_MID));
+  tris.push(tri([pts[0][0], y, pts[0][1]], [pts[3][0], y, pts[3][1]], [pts[2][0], y, pts[2][1]], SHADOW_MID));
+  tris.push(...makeContactShadow(x, gy, z, 0.15 * scale));
+  return tris;
+}
+
+function makeBushShadow(x, gy, z, scale) {
+  const offsetX = 0.4 * scale * SUN_FLAT_X;
+  const offsetZ = 0.4 * scale * SUN_FLAT_Z;
+  const sx = x + offsetX * 0.4;
+  const sz = z + offsetZ * 0.4;
+  const tris = shadowEllipse(sx, gy, sz, 0.35 * scale, 0.25 * scale, 5, SHADOW_MID);
+  tris.push(...makeContactShadow(x, gy, z, 0.18 * scale));
+  return tris;
+}
 
 export function makeTreeA(x, y, z, scale = 1, rot = 0) {
   let tris = [];
@@ -220,21 +324,4 @@ export function makeGroundPatch(cx, cz, sizeX, sizeZ, yFunc, color) {
   return tris;
 }
 
-export function makeShadowPatch(x, y, z, radius) {
-  const tris = [];
-  const c = [0.15, 0.18, 0.1];
-  const segs = 5;
-  for (let i = 0; i < segs; i++) {
-    const a1 = (i / segs) * Math.PI * 2;
-    const a2 = ((i+1) / segs) * Math.PI * 2;
-    tris.push(tri(
-      [x, y + 0.01, z],
-      [x + Math.cos(a2)*radius, y + 0.01, z + Math.sin(a2)*radius],
-      [x + Math.cos(a1)*radius, y + 0.01, z + Math.sin(a1)*radius],
-      c
-    ));
-  }
-  return tris;
-}
-
-export { translate, rotateTrisY, scaleTris };
+export { translate, rotateTrisY, scaleTris, makeTreeShadow, makeRockShadow, makeStumpShadow, makeLogShadow, makeBushShadow };
