@@ -45,6 +45,33 @@ function lerpColor(a, b, t) {
   return [a[0] + (b[0]-a[0])*t, a[1] + (b[1]-a[1])*t, a[2] + (b[2]-a[2])*t];
 }
 
+const MIN_TREE_DIST = 2.0;
+const MIN_BUSH_DIST = 1.2;
+
+function nearestPathDist(px, pz) {
+  let best = 1e9;
+  let bestDx = 0;
+  for (let i = 0; i < PATH_NODES.length - 1; i++) {
+    const ax = PATH_NODES[i][0], az = PATH_NODES[i][2];
+    const bx = PATH_NODES[i+1][0], bz = PATH_NODES[i+1][2];
+    const dx = bx - ax, dz = bz - az;
+    const len2 = dx * dx + dz * dz;
+    const t = Math.max(0, Math.min(1, ((px - ax) * dx + (pz - az) * dz) / len2));
+    const cx = ax + t * dx, cz = az + t * dz;
+    const ex = px - cx, ez = pz - cz;
+    const d = Math.sqrt(ex * ex + ez * ez);
+    if (d < best) { best = d; bestDx = ex; }
+  }
+  return { dist: best, dx: bestDx };
+}
+
+function pushFromPath(x, z, minDist) {
+  const { dist, dx } = nearestPathDist(x, z);
+  if (dist >= minDist) return x;
+  const sign = dx >= 0 ? 1 : -1;
+  return x + sign * (minDist - dist);
+}
+
 export function buildScene() {
   const tris = [];
 
@@ -103,12 +130,14 @@ export function buildScene() {
   const treeHeights = { A: 3.6, B: 4.4, C: 4.0 };
   const treeCanopy = { A: 1.4, B: 1.6, C: 1.0 };
 
-  for (const [type, x, y, z, s, r] of trees) {
+  const placedTrees = trees.map(([type, x, y, z, s, r]) => [type, pushFromPath(x, z, MIN_TREE_DIST), y, z, s, r]);
+
+  for (const [type, x, y, z, s, r] of placedTrees) {
     const gy = groundY(x, z);
     tris.push(...makeTreeShadow(x, gy, z, treeHeights[type], treeCanopy[type], s));
   }
 
-  const bushes = [
+  const rawBushes = [
     [-1.5, 3, 0.8, 1.0], [2.5, 5, 0.9, 2.3], [-2, 8, 1.0, 0.5],
     [1.8, 10, 0.7, 3.1], [-1, 12, 0.9, 1.8], [3, 15, 0.8, 0.7],
     [-2.5, 17, 1.1, 2.9], [1.5, 19, 0.7, 4.2], [-1.8, 22, 0.9, 1.1],
@@ -119,6 +148,8 @@ export function buildScene() {
     [-0.6, 20, 0.55, 3.9], [0.9, 27, 0.5, 5.7], [-1.0, 33, 0.6, 4.0],
     [0.7, 40, 0.55, 6.5],
   ];
+  const bushes = rawBushes.map(([x, z, s, r]) => [pushFromPath(x, z, MIN_BUSH_DIST), z, s, r]);
+
   for (const [x, z, s, r] of bushes) {
     const gy = groundY(x, z);
     tris.push(...makeBushShadow(x, gy, z, s));
@@ -155,7 +186,7 @@ export function buildScene() {
     tris.push(...makeLogShadow(x, gy, z, len, s, r));
   }
 
-  for (const [type, x, y, z, s, r] of trees) {
+  for (const [type, x, y, z, s, r] of placedTrees) {
     const gy = groundY(x, z);
     if (type === 'A') tris.push(...makeTreeA(x, gy, z, s, r));
     else if (type === 'B') tris.push(...makeTreeB(x, gy, z, s, r));

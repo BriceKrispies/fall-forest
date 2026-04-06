@@ -137,8 +137,8 @@ export class Renderer {
     if (!baseP) return;
     const tipP = projectPoint(this.mvp, [blade.x + blade.sway, blade.y + blade.height, blade.z], this.hw, this.hh);
     if (!tipP) return;
-    const bx = Math.round(baseP[0]), by = Math.round(baseP[1]);
-    const tx = Math.round(tipP[0]), ty = Math.round(tipP[1]);
+    const bx = Math.round(baseP[0]), by = Math.round(baseP[1]), bz = baseP[2];
+    const tx = Math.round(tipP[0]), ty = Math.round(tipP[1]), tz = tipP[2];
     if (bx < 0 || bx >= this.w || by < 0 || by >= this.h) return;
     if (tx < 0 || tx >= this.w || ty < 0 || ty >= this.h) return;
     const steps = Math.max(Math.abs(tx - bx), Math.abs(ty - by), 1);
@@ -148,7 +148,10 @@ export class Renderer {
       const px = Math.round(bx + (tx - bx) * t);
       const py = Math.round(by + (ty - by) * t);
       if (px < 0 || px >= this.w || py < 0 || py >= this.h) continue;
-      const idx = (py * this.w + px) * 4;
+      const di = py * this.w + px;
+      const z = bz + (tz - bz) * t;
+      if (z > this.depth[di]) continue;
+      const idx = di * 4;
       const a = 0.5 + t * 0.3;
       this.pixels[idx] = this.pixels[idx] + (gr - this.pixels[idx]) * a;
       this.pixels[idx + 1] = this.pixels[idx + 1] + (gg - this.pixels[idx + 1]) * a;
@@ -159,14 +162,16 @@ export class Renderer {
   drawLeafParticle(leaf) {
     const sp = projectPoint(this.mvp, [leaf.x, leaf.y, leaf.z], this.hw, this.hh);
     if (!sp) return;
-    const sx = Math.round(sp[0]), sy = Math.round(sp[1]);
+    const sx = Math.round(sp[0]), sy = Math.round(sp[1]), sz = sp[2];
     if (sx < 1 || sx >= this.w - 1 || sy < 1 || sy >= this.h - 1) return;
     const a = leaf.alpha;
     const lr = 180, lg = 140, lb = 60;
     for (let dy = -1; dy <= 1; dy++) {
       for (let dx = -1; dx <= 1; dx++) {
         if (dx !== 0 && dy !== 0) continue;
-        const idx = ((sy + dy) * this.w + (sx + dx)) * 4;
+        const di = (sy + dy) * this.w + (sx + dx);
+        if (sz > this.depth[di]) continue;
+        const idx = di * 4;
         const fa = a * (dx === 0 && dy === 0 ? 0.9 : 0.4);
         this.pixels[idx] = this.pixels[idx] + (lr - this.pixels[idx]) * fa;
         this.pixels[idx + 1] = this.pixels[idx + 1] + (lg - this.pixels[idx + 1]) * fa;
@@ -178,12 +183,14 @@ export class Renderer {
   drawCreature(creature) {
     const sp = projectPoint(this.mvp, [creature.x, creature.y + 0.08, creature.z], this.hw, this.hh);
     if (!sp) return;
-    const sx = Math.round(sp[0]), sy = Math.round(sp[1]);
+    const sx = Math.round(sp[0]), sy = Math.round(sp[1]), sz = sp[2];
     if (sx < 2 || sx >= this.w - 2 || sy < 2 || sy >= this.h - 2) return;
     const cr = 100, cg = 75, cb = 55;
     const bodyPixels = [[0,0],[1,0],[-1,0],[0,-1]];
     for (const [dx, dy] of bodyPixels) {
-      const idx = ((sy + dy) * this.w + (sx + dx)) * 4;
+      const di = (sy + dy) * this.w + (sx + dx);
+      if (sz > this.depth[di]) continue;
+      const idx = di * 4;
       this.pixels[idx] = cr;
       this.pixels[idx + 1] = cg;
       this.pixels[idx + 2] = cb;
