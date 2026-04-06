@@ -132,6 +132,71 @@ export class Renderer {
     }
   }
 
+  drawDynamicTris(tris) {
+    const w = this.w, h = this.h;
+    const pixels = this.pixels, depth = this.depth;
+    for (let i = 0; i < tris.length; i++) {
+      const [v0, v1, v2, color] = tris[i];
+      const p0 = projectPoint(this.mvp, v0, this.hw, this.hh);
+      const p1 = projectPoint(this.mvp, v1, this.hw, this.hh);
+      const p2 = projectPoint(this.mvp, v2, this.hw, this.hh);
+      if (!p0 || !p1 || !p2) continue;
+      const cr = (color[0] * 255) | 0, cg = (color[1] * 255) | 0, cb = (color[2] * 255) | 0;
+      let minX = Math.max(0, Math.floor(Math.min(p0[0], p1[0], p2[0])));
+      let maxX = Math.min(w - 1, Math.ceil(Math.max(p0[0], p1[0], p2[0])));
+      let minY = Math.max(0, Math.floor(Math.min(p0[1], p1[1], p2[1])));
+      let maxY = Math.min(h - 1, Math.ceil(Math.max(p0[1], p1[1], p2[1])));
+      if (minX > maxX || minY > maxY) continue;
+      if (maxX - minX > w || maxY - minY > h) continue;
+      const dx01 = p1[0] - p0[0], dy01 = p1[1] - p0[1];
+      const dx02 = p2[0] - p0[0], dy02 = p2[1] - p0[1];
+      const denom = dx01 * dy02 - dx02 * dy01;
+      if (denom > -0.001 && denom < 0.001) continue;
+      const invD = 1 / denom;
+      for (let y = minY; y <= maxY; y++) {
+        for (let x = minX; x <= maxX; x++) {
+          const dx = x - p0[0], dy = y - p0[1];
+          const u = (dx * dy02 - dx02 * dy) * invD;
+          const v = (dx01 * dy - dx * dy01) * invD;
+          if (u < 0 || v < 0 || u + v > 1) continue;
+          const z = p0[2] + u * (p1[2] - p0[2]) + v * (p2[2] - p0[2]);
+          const idx = y * w + x;
+          if (z < depth[idx]) {
+            depth[idx] = z;
+            const pi = idx * 4;
+            pixels[pi] = cr; pixels[pi + 1] = cg; pixels[pi + 2] = cb;
+          }
+        }
+      }
+    }
+  }
+
+  drawFireGlow(firePosWorld, camPos) {
+    const sp = projectPoint(this.mvp, [firePosWorld[0], firePosWorld[1] + 0.3, firePosWorld[2]], this.hw, this.hh);
+    if (!sp) return;
+    const dx = firePosWorld[0] - camPos[0], dz = firePosWorld[2] - camPos[2];
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    if (dist > 25) return;
+    const sx = sp[0], sy = sp[1];
+    const intensity = Math.max(0, 1 - dist / 20);
+    const r = Math.round(12 + intensity * 8);
+    const pixels = this.pixels;
+    const w = this.w, h = this.h;
+    for (let y = Math.max(0, Math.floor(sy - r)); y <= Math.min(h - 1, Math.ceil(sy + r)); y++) {
+      for (let x = Math.max(0, Math.floor(sx - r)); x <= Math.min(w - 1, Math.ceil(sx + r)); x++) {
+        const ddx = x - sx, ddy = y - sy;
+        const d = Math.sqrt(ddx * ddx + ddy * ddy);
+        if (d > r) continue;
+        const t = 1 - d / r;
+        const a = t * t * intensity * 0.35;
+        const idx = (y * w + x) * 4;
+        pixels[idx] = Math.min(255, pixels[idx] + (255 - pixels[idx]) * a * 1.0) | 0;
+        pixels[idx + 1] = Math.min(255, pixels[idx + 1] + (180 - pixels[idx + 1]) * a * 0.7) | 0;
+        pixels[idx + 2] = Math.min(255, pixels[idx + 2] + (60 - pixels[idx + 2]) * a * 0.3) | 0;
+      }
+    }
+  }
+
   drawGrassBlade(blade) {
     const baseP = projectPoint(this.mvp, [blade.x, blade.y, blade.z], this.hw, this.hh);
     if (!baseP) return;

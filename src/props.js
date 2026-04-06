@@ -324,4 +324,122 @@ export function makeGroundPatch(cx, cz, sizeX, sizeZ, yFunc, color) {
   return tris;
 }
 
+const CHAR_LOG = [0.2, 0.13, 0.07];
+const ASH_COLOR = [0.25, 0.22, 0.18];
+const EMBER_COLOR = [0.55, 0.2, 0.05];
+const WARM_GROUND = [0.3, 0.2, 0.12];
+
+export function makeFireplace(x, y, z) {
+  const tris = [];
+  const ringR = 0.55;
+  const stoneCount = 8;
+  for (let i = 0; i < stoneCount; i++) {
+    const a = (i / stoneCount) * Math.PI * 2;
+    const sx = x + Math.cos(a) * ringR;
+    const sz = z + Math.sin(a) * ringR;
+    const sc = 0.18 + Math.sin(i * 3.7) * 0.04;
+    const rot = a + 0.3;
+    const c = i % 2 === 0 ? ROCK_GREY : ROCK_DARK;
+    tris.push(...pyramidTris(sx, y, sz, sc, 0.14 + Math.sin(i*2.1)*0.03, 4, c));
+  }
+
+  tris.push(...pyramidTris(x, y, z, 0.5, 0.02, 6, ASH_COLOR));
+
+  const logLen = 0.4;
+  const logR = 0.05;
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI * 2 + 0.3;
+    const lx = x + Math.cos(a) * 0.12;
+    const lz = z + Math.sin(a) * 0.12;
+    const sides = 4;
+    for (let j = 0; j < sides; j++) {
+      const a1 = (j / sides) * Math.PI * 2;
+      const a2 = ((j+1) / sides) * Math.PI * 2;
+      const y1 = logR + Math.cos(a1)*logR, z1 = Math.sin(a1)*logR;
+      const y2 = logR + Math.cos(a2)*logR, z2 = Math.sin(a2)*logR;
+      const cr = Math.cos(a), sr = Math.sin(a);
+      tris.push(...quad(
+        [lx - logLen*0.5*cr, y + y1, lz - logLen*0.5*sr + z1],
+        [lx + logLen*0.5*cr, y + y1, lz + logLen*0.5*sr + z1],
+        [lx + logLen*0.5*cr, y + y2, lz + logLen*0.5*sr + z2],
+        [lx - logLen*0.5*cr, y + y2, lz - logLen*0.5*sr + z2],
+        j < 2 ? CHAR_LOG : EMBER_COLOR
+      ));
+    }
+  }
+
+  const warmSegs = 8;
+  const warmR = 1.0;
+  const wy = y + 0.01;
+  for (let i = 0; i < warmSegs; i++) {
+    const a1 = (i / warmSegs) * Math.PI * 2;
+    const a2 = ((i+1) / warmSegs) * Math.PI * 2;
+    tris.push(tri(
+      [x, wy, z],
+      [x + Math.cos(a2)*warmR, wy, z + Math.sin(a2)*warmR],
+      [x + Math.cos(a1)*warmR, wy, z + Math.sin(a1)*warmR],
+      WARM_GROUND
+    ));
+  }
+
+  return tris;
+}
+
+export function makeFireFlames(x, y, z, time) {
+  const tris = [];
+  const flameColors = [
+    [0.95, 0.7, 0.15],
+    [0.95, 0.5, 0.08],
+    [0.9, 0.35, 0.05],
+    [0.85, 0.25, 0.03],
+    [1.0, 0.85, 0.3],
+  ];
+
+  for (let i = 0; i < 7; i++) {
+    const phase = time * 3.5 + i * 2.1;
+    const flicker = Math.sin(phase) * 0.5 + 0.5;
+    const sway = Math.sin(phase * 0.7 + i) * 0.06;
+    const a = (i / 7) * Math.PI * 2 + Math.sin(time + i) * 0.3;
+    const dist = 0.06 + flicker * 0.06;
+    const fx = x + Math.cos(a) * dist + sway;
+    const fz = z + Math.sin(a) * dist;
+    const h = 0.2 + flicker * 0.25 + Math.sin(phase * 1.3) * 0.08;
+    const w = 0.04 + flicker * 0.03;
+    const col = flameColors[i % flameColors.length];
+
+    tris.push(tri(
+      [fx - w, y + 0.08, fz],
+      [fx + w, y + 0.08, fz],
+      [fx + sway * 0.5, y + 0.08 + h, fz + 0.01],
+      col
+    ));
+    tris.push(tri(
+      [fx, y + 0.08, fz - w],
+      [fx, y + 0.08, fz + w],
+      [fx + sway * 0.5, y + 0.08 + h, fz + 0.01],
+      col
+    ));
+  }
+
+  for (let i = 0; i < 4; i++) {
+    const phase = time * 2.2 + i * 3.7;
+    const flicker = Math.sin(phase) * 0.5 + 0.5;
+    const sway = Math.sin(phase * 0.5) * 0.03;
+    const a = (i / 4) * Math.PI * 2 + 0.5;
+    const fx = x + Math.cos(a) * 0.03 + sway;
+    const fz = z + Math.sin(a) * 0.03;
+    const h = 0.35 + flicker * 0.2;
+    const w = 0.025;
+
+    tris.push(tri(
+      [fx - w, y + 0.12, fz],
+      [fx + w, y + 0.12, fz],
+      [fx + sway, y + 0.12 + h, fz],
+      [1.0, 0.9, 0.4]
+    ));
+  }
+
+  return tris;
+}
+
 export { translate, rotateTrisY, scaleTris, makeTreeShadow, makeRockShadow, makeStumpShadow, makeLogShadow, makeBushShadow };

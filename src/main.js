@@ -1,6 +1,7 @@
 import { Renderer, SUN_DIR } from './renderer.js';
 import { FreeCamera } from './camera.js';
-import { buildScene, PATH_NODES } from './scene.js';
+import { buildScene, PATH_NODES, FIREPLACE_POS } from './scene.js';
+import { makeFireFlames } from './props.js';
 import { initWasm, getWasm, uploadMVP, uploadCamera, uploadSunDir, uploadConstants, uploadTriangles, readLeaves, readCreatures, readMetrics, uploadGrassInstances, readGrassVisible, LAYOUT, getF32 } from './wasm-bridge.js';
 
 const RENDER_W = 320;
@@ -126,6 +127,12 @@ async function start() {
 
     const visCount = wasm.process_triangles();
     renderer.rasterizeWasmOutput(visCount);
+
+    const fpGy = Math.sin(FIREPLACE_POS[0] * 0.3) * 0.08 + Math.cos(FIREPLACE_POS[2] * 0.25) * 0.06 +
+      Math.sin(FIREPLACE_POS[0] * 0.7 + FIREPLACE_POS[2] * 0.5) * 0.04;
+    const flames = makeFireFlames(FIREPLACE_POS[0], fpGy, FIREPLACE_POS[2], totalTime);
+    renderer.drawDynamicTris(flames);
+    renderer.drawFireGlow([FIREPLACE_POS[0], fpGy, FIREPLACE_POS[2]], eye);
 
     wasm.update_leaves(dt, eye[0], eye[2], totalTime * 0.7);
     const leaves = readLeaves();

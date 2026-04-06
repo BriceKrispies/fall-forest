@@ -1,7 +1,8 @@
 import {
   makeTreeA, makeTreeB, makeTreeC, makeBush, makeFlowerPatch,
   makeGrassClump, makeRock, makeStump, makeLog, makeGroundPatch,
-  makeTreeShadow, makeRockShadow, makeStumpShadow, makeLogShadow, makeBushShadow
+  makeTreeShadow, makeRockShadow, makeStumpShadow, makeLogShadow, makeBushShadow,
+  makeFireplace
 } from './props.js';
 
 const PATH_COLOR_LIT = [0.6, 0.44, 0.28];
@@ -241,5 +242,10 @@ export function buildScene() {
     tris.push(...makeLog(x, gy, z, len, s, r));
   }
 
+  const fpx = 4.5, fpz = 43.5;
+  tris.push(...makeFireplace(fpx, groundY(fpx, fpz), fpz));
+
   return tris;
 }
+
+export const FIREPLACE_POS = [4.5, 0, 43.5];
