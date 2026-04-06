@@ -16,15 +16,17 @@ canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; 
     width: 100%; pointer-events: none; z-index: 10;
     padding: 0 20px calc(20px + env(safe-area-inset-bottom, 0px)) 20px;
   }
-  #btn-fwd, #btn-back {
-    pointer-events: auto; position: absolute; left: 28px;
-    width: 72px; height: 72px; border-radius: 50%;
+  #btn-fwd, #btn-back, #btn-left, #btn-right {
+    pointer-events: auto; position: absolute;
+    width: 60px; height: 60px; border-radius: 50%;
     border: 2px solid rgba(255,240,210,0.3); background: rgba(255,240,210,0.08);
-    color: rgba(255,240,210,0.5); font-size: 28px; line-height: 72px;
+    color: rgba(255,240,210,0.5); font-size: 24px; line-height: 60px;
     text-align: center; touch-action: none; -webkit-tap-highlight-color: transparent;
   }
-  #btn-fwd { bottom: calc(100px + env(safe-area-inset-bottom, 0px)); }
-  #btn-back { bottom: calc(20px + env(safe-area-inset-bottom, 0px)); }
-  #btn-fwd:active, #btn-back:active { background: rgba(255,240,210,0.18); }
+  #btn-fwd { left: 68px; bottom: calc(140px + env(safe-area-inset-bottom, 0px)); }
+  #btn-back { left: 68px; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); }
+  #btn-left { left: 8px; bottom: calc(80px + env(safe-area-inset-bottom, 0px)); }
+  #btn-right { left: 128px; bottom: calc(80px + env(safe-area-inset-bottom, 0px)); }
+  #btn-fwd:active, #btn-back:active, #btn-left:active, #btn-right:active { background: rgba(255,240,210,0.18); }
   canvas { cursor: default; }
 }

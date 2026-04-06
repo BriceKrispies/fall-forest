@@ -1,5 +1,5 @@
 import { Renderer, SUN_DIR } from './renderer.js';
-import { RailCamera } from './camera.js';
+import { FreeCamera } from './camera.js';
 import { buildScene, PATH_NODES } from './scene.js';
 import { initWasm, getWasm, uploadMVP, uploadCamera, uploadSunDir, uploadConstants, uploadTriangles, readLeaves, readCreatures, readMetrics, uploadGrassInstances, readGrassVisible, LAYOUT, getF32 } from './wasm-bridge.js';
 
@@ -14,7 +14,7 @@ async function start() {
   const wasm = await initWasm();
 
   const renderer = new Renderer(canvas, RENDER_W, RENDER_H);
-  const camera = new RailCamera(PATH_NODES);
+  const camera = new FreeCamera(PATH_NODES[0]);
   const sceneTris = buildScene();
 
   wasm.set_screen(RENDER_W, RENDER_H);
@@ -25,7 +25,7 @@ async function start() {
   const grassInstances = buildGrassInstances();
   uploadGrassInstances(grassInstances);
 
-  const input = { forward: false, backward: false, dx: 0, dy: 0 };
+  const input = { forward: false, backward: false, left: false, right: false, dx: 0, dy: 0 };
   let locked = false;
   let lastTime = performance.now();
   let hintTimer = 0;
@@ -48,14 +48,16 @@ async function start() {
   }
 
   if (isTouch) {
-    const btnFwd = document.getElementById('btn-fwd');
-    const btnBack = document.getElementById('btn-back');
-    btnFwd.addEventListener('touchstart', (e) => { e.preventDefault(); input.forward = true; });
-    btnFwd.addEventListener('touchend', (e) => { e.preventDefault(); input.forward = false; });
-    btnFwd.addEventListener('touchcancel', () => { input.forward = false; });
-    btnBack.addEventListener('touchstart', (e) => { e.preventDefault(); input.backward = true; });
-    btnBack.addEventListener('touchend', (e) => { e.preventDefault(); input.backward = false; });
-    btnBack.addEventListener('touchcancel', () => { input.backward = false; });
+    const btns = [
+      ['btn-fwd', 'forward'], ['btn-back', 'backward'],
+      ['btn-left', 'left'], ['btn-right', 'right'],
+    ];
+    for (const [id, key] of btns) {
+      const el = document.getElementById(id);
+      el.addEventListener('touchstart', (e) => { e.preventDefault(); input[key] = true; });
+      el.addEventListener('touchend', (e) => { e.preventDefault(); input[key] = false; });
+      el.addEventListener('touchcancel', () => { input[key] = false; });
+    }
 
     let lookTouchId = null;
     let lastTouchX = 0, lastTouchY = 0;
@@ -91,10 +93,14 @@ async function start() {
   document.addEventListener('keydown', (e) => {
     if (e.code === 'KeyW' || e.code === 'ArrowUp') input.forward = true;
     if (e.code === 'KeyS' || e.code === 'ArrowDown') input.backward = true;
+    if (e.code === 'KeyA' || e.code === 'ArrowLeft') input.left = true;
+    if (e.code === 'KeyD' || e.code === 'ArrowRight') input.right = true;
   });
   document.addEventListener('keyup', (e) => {
     if (e.code === 'KeyW' || e.code === 'ArrowUp') input.forward = false;
     if (e.code === 'KeyS' || e.code === 'ArrowDown') input.backward = false;
+    if (e.code === 'KeyA' || e.code === 'ArrowLeft') input.left = false;
+    if (e.code === 'KeyD' || e.code === 'ArrowRight') input.right = false;
   });
 
   function frame(now) {
