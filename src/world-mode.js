@@ -20,24 +20,24 @@ const MODES = {
 
   hell: {
     fogColor:       [0.35, 0.08, 0.04],
-    ambientLevel:   0.55,
-    ambientTint:    [1.0, 0.4, 0.2],
-    nightness:      0.7,
+    ambientLevel:   0.45,
+    ambientTint:    [1.0, 0.35, 0.15],
+    nightness:      0.75,
     sunVisible:     false,
     sunTint:        [1.0, 0.3, 0.1],
-    skyTint:        [0.4, 0.05, 0.02],
-    creatureColor:  [180, 40, 30],
+    skyTint:        [0.5, 0.06, 0.02],
+    creatureColor:  [200, 45, 25],
     creatureShape:  'horned',
     timeScale:      0,
   },
 
   dark: {
-    fogColor:       [0.03, 0.03, 0.06],
-    ambientLevel:   0.08,
-    ambientTint:    [0.3, 0.35, 0.6],
+    fogColor:       [0.015, 0.015, 0.035],
+    ambientLevel:   0.04,
+    ambientTint:    [0.2, 0.22, 0.5],
     nightness:      1.0,
     sunVisible:     false,
-    skyTint:        [0.02, 0.02, 0.06],
+    skyTint:        [0.01, 0.01, 0.04],
     timeScale:      0,
   },
 
@@ -52,12 +52,11 @@ const MODES = {
   },
 
   rain: {
-    fogColor:       [0.45, 0.48, 0.52],
-    ambientLevel:   0.40,
-    ambientTint:    [0.7, 0.75, 0.82],
-    nightness:      0.3,
+    fogColor:       [0.38, 0.40, 0.44],
+    ambientLevel:   0.35,
+    ambientTint:    [0.65, 0.68, 0.75],
+    nightness:      0,        // no stars/moon — overcast, not nighttime
     sunVisible:     false,
-    skyTint:        [0.3, 0.33, 0.38],
     timeScale:      0,
   },
 };
@@ -68,7 +67,7 @@ export class WorldMode {
   constructor() {
     this.current = 'normal';
     this.blend = 1.0;               // 0 = at snapshot, 1 = fully at target mode
-    this.transitionSpeed = 0.5;     // blend units per second (~2s full transition)
+    this.transitionSpeed = 1.8;     // blend units per second (~0.6s full transition)
     this.snapshot = null;            // frozen resolved state at transition start
     this.resolved = {};              // the output every system reads
   }
