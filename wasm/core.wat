@@ -19,14 +19,20 @@
   (global $OFF_CONSTANTS i32 (i32.const 96))
   (global $OFF_METRICS i32 (i32.const 128))
   (global $OFF_TRI_IN i32 (i32.const 256))
-  (global $MAX_TRIS i32 (i32.const 16000))
-  (global $OFF_TRI_OUT i32 (i32.const 768256))
-  (global $OFF_LEAVES i32 (i32.const 1728256))
+  (global $MAX_TRIS i32 (i32.const 28000))
+  (global $OFF_TRI_OUT i32 (i32.const 1344256))
+  (global $OFF_LEAVES i32 (i32.const 2688256))
   (global $MAX_LEAVES i32 (i32.const 64))
-  (global $OFF_GRASS i32 (i32.const 1730304))
+  (global $OFF_GRASS i32 (i32.const 2690304))
   (global $MAX_GRASS i32 (i32.const 2000))
-  (global $OFF_CREATURES i32 (i32.const 1794304))
+  (global $OFF_CREATURES i32 (i32.const 2754304))
   (global $MAX_CREATURES i32 (i32.const 16))
+
+  ;; Point lights (fire/lamp): up to 8 lights, each 16 bytes (x, y, z, radius)
+  ;; Count at offset 156, light data at offset 160
+  (global $OFF_LIGHT_COUNT i32 (i32.const 156))
+  (global $OFF_LIGHTS i32 (i32.const 160))
+  (global $MAX_LIGHTS i32 (i32.const 8))
 
   (func $f32_load (param $off i32) (result f32)
     (f32.load (local.get $off))
@@ -180,6 +186,9 @@
     (local $dx f32) (local $dy f32) (local $dz f32) (local $dist f32) (local $fog f32)
     (local $sr f32) (local $sg f32) (local $sb f32)
     (local $amb f32)
+    (local $li i32) (local $light_off i32) (local $light_count i32)
+    (local $lx f32) (local $ly f32) (local $lz f32) (local $lrad f32)
+    (local $ldx f32) (local $ldy f32) (local $ldz f32) (local $ldist f32) (local $latt f32)
 
     (local.set $vis (i32.const 0))
     (local.set $i (i32.const 0))
@@ -211,7 +220,7 @@
           (f32.div (f32.add (f32.add (local.get $v0z) (local.get $v1z)) (local.get $v2z)) (f32.const 3))
           (call $cam_z)))
 
-        (if (f32.gt (f32.add (f32.mul (local.get $cx) (local.get $cx)) (f32.mul (local.get $cz) (local.get $cz))) (f32.const 1600))
+        (if (f32.gt (f32.add (f32.mul (local.get $cx) (local.get $cx)) (f32.mul (local.get $cz) (local.get $cz))) (f32.const 3600))
           (then
             (local.set $in_off (i32.add (local.get $in_off) (i32.const 48)))
             (local.set $i (i32.add (local.get $i) (i32.const 1)))
@@ -278,6 +287,37 @@
           )
         )
 
+        ;; Frustum culling — skip if projected tri is entirely off-screen
+        (if (i32.or
+          (i32.or
+            ;; all three vertices left of screen
+            (i32.and (i32.and
+              (f32.lt (local.get $p0x) (f32.const 0))
+              (f32.lt (local.get $p1x) (f32.const 0)))
+              (f32.lt (local.get $p2x) (f32.const 0)))
+            ;; all three vertices right of screen
+            (i32.and (i32.and
+              (f32.gt (local.get $p0x) (global.get $screen_w))
+              (f32.gt (local.get $p1x) (global.get $screen_w)))
+              (f32.gt (local.get $p2x) (global.get $screen_w))))
+          (i32.or
+            ;; all three vertices above screen
+            (i32.and (i32.and
+              (f32.lt (local.get $p0y) (f32.const 0))
+              (f32.lt (local.get $p1y) (f32.const 0)))
+              (f32.lt (local.get $p2y) (f32.const 0)))
+            ;; all three vertices below screen
+            (i32.and (i32.and
+              (f32.gt (local.get $p0y) (global.get $screen_h))
+              (f32.gt (local.get $p1y) (global.get $screen_h)))
+              (f32.gt (local.get $p2y) (global.get $screen_h)))))
+          (then
+            (local.set $in_off (i32.add (local.get $in_off) (i32.const 48)))
+            (local.set $i (i32.add (local.get $i) (i32.const 1)))
+            (br $loop)
+          )
+        )
+
         (local.set $centx (f32.add (local.get $cx) (call $cam_x)))
         (local.set $centy (f32.div (f32.add (f32.add (local.get $v0y) (local.get $v1y)) (local.get $v2y)) (f32.const 3)))
         (local.set $centz (f32.add (local.get $cz) (call $cam_z)))
@@ -302,6 +342,48 @@
         (local.set $sr (f32.mul (f32.mul (local.get $cr) (local.get $tintR)) (local.get $light)))
         (local.set $sg (f32.mul (f32.mul (local.get $cg) (local.get $tintG)) (local.get $light)))
         (local.set $sb (f32.mul (f32.mul (local.get $cb) (local.get $tintB)) (local.get $light)))
+
+        ;; Point light contribution
+        (local.set $light_count (i32.load (global.get $OFF_LIGHT_COUNT)))
+        (local.set $li (i32.const 0))
+        (local.set $light_off (global.get $OFF_LIGHTS))
+        (block $lbreak
+          (loop $lloop
+            (br_if $lbreak (i32.ge_u (local.get $li) (local.get $light_count)))
+
+            (local.set $lx (f32.load (local.get $light_off)))
+            (local.set $ly (f32.load (i32.add (local.get $light_off) (i32.const 4))))
+            (local.set $lz (f32.load (i32.add (local.get $light_off) (i32.const 8))))
+            (local.set $lrad (f32.load (i32.add (local.get $light_off) (i32.const 12))))
+
+            (local.set $ldx (f32.sub (local.get $centx) (local.get $lx)))
+            (local.set $ldy (f32.sub (local.get $centy) (local.get $ly)))
+            (local.set $ldz (f32.sub (local.get $centz) (local.get $lz)))
+            (local.set $ldist (f32.sqrt (f32.add (f32.add
+              (f32.mul (local.get $ldx) (local.get $ldx))
+              (f32.mul (local.get $ldy) (local.get $ldy)))
+              (f32.mul (local.get $ldz) (local.get $ldz)))))
+
+            ;; Attenuation: smoothstep falloff from 0 at radius to 1 at center
+            (if (f32.lt (local.get $ldist) (local.get $lrad))
+              (then
+                (local.set $latt (call $smoothstep (local.get $lrad) (f32.const 0) (local.get $ldist)))
+                ;; Warm firelight: add (att * color_channel * warm_tint)
+                ;; Tint: R=1.0, G=0.6, B=0.2 — warm orange
+                (local.set $sr (f32.add (local.get $sr)
+                  (f32.mul (local.get $latt) (f32.mul (local.get $cr) (f32.const 1.0)))))
+                (local.set $sg (f32.add (local.get $sg)
+                  (f32.mul (local.get $latt) (f32.mul (local.get $cg) (f32.const 0.6)))))
+                (local.set $sb (f32.add (local.get $sb)
+                  (f32.mul (local.get $latt) (f32.mul (local.get $cb) (f32.const 0.2)))))
+              )
+            )
+
+            (local.set $light_off (i32.add (local.get $light_off) (i32.const 16)))
+            (local.set $li (i32.add (local.get $li) (i32.const 1)))
+            (br $lloop)
+          )
+        )
 
         (local.set $dx (f32.sub (local.get $centx) (call $cam_x)))
         (local.set $dy (f32.sub (local.get $centy) (call $cam_y)))

@@ -45,6 +45,7 @@ export class Renderer {
     this.nightness = resolved.nightness;
     this.creatureColor = resolved.creatureColor || null;
     this.creatureShape = resolved.creatureShape || null;
+    this.lampColor = resolved.lampColor || null;
   }
 
   beginFrame(camPos, camTarget, camUp, fov) {
@@ -282,6 +283,68 @@ export class Renderer {
         pixels[idx] = Math.min(255, pixels[idx] + (255 - pixels[idx]) * a * 1.0) | 0;
         pixels[idx + 1] = Math.min(255, pixels[idx + 1] + (180 - pixels[idx + 1]) * a * 0.7) | 0;
         pixels[idx + 2] = Math.min(255, pixels[idx + 2] + (60 - pixels[idx + 2]) * a * 0.3) | 0;
+      }
+    }
+  }
+
+  drawLampGlow(lampPosWorld, camPos, time) {
+    // Lamp housing is at y + 1.86 (stem 1.6 + base 0.11 + housing midpoint 0.15)
+    const lampY = lampPosWorld[1] + 1.86;
+    const sp = projectPoint(this.mvp, [lampPosWorld[0], lampY, lampPosWorld[2]], this.hw, this.hh);
+    if (!sp) return;
+    const dx = lampPosWorld[0] - camPos[0], dz = lampPosWorld[2] - camPos[2];
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    if (dist > 25) return;
+    const sx = sp[0], sy = sp[1], sz = sp[2];
+
+    // Subtle flicker
+    const flicker = 0.92 + Math.sin(time * 2.3) * 0.04 + Math.sin(time * 5.7) * 0.04;
+
+    // Lamp color from world mode (default warm amber)
+    const lc = this.lampColor || [255, 200, 100];
+
+    const nightBoost = 1 + this.nightness * 0.8;
+    const intensity = Math.max(0, 1 - dist / (14 * nightBoost)) * nightBoost * flicker;
+    const r = Math.round(6 + intensity * 4);
+    const pixels = this.pixels;
+    const depth = this.depth;
+    const w = this.w, h = this.h;
+    for (let y = Math.max(0, Math.floor(sy - r)); y <= Math.min(h - 1, Math.ceil(sy + r)); y++) {
+      for (let x = Math.max(0, Math.floor(sx - r)); x <= Math.min(w - 1, Math.ceil(sx + r)); x++) {
+        const di = y * w + x;
+        if (depth[di] < sz - 0.5) continue;
+        const ddx = x - sx, ddy = y - sy;
+        const d = Math.sqrt(ddx * ddx + ddy * ddy);
+        if (d > r) continue;
+        const t = 1 - d / r;
+        const a = t * t * intensity * 0.25;
+        const idx = di * 4;
+        pixels[idx]     = Math.min(255, pixels[idx]     + (lc[0] - pixels[idx])     * a) | 0;
+        pixels[idx + 1] = Math.min(255, pixels[idx + 1] + (lc[1] - pixels[idx + 1]) * a) | 0;
+        pixels[idx + 2] = Math.min(255, pixels[idx + 2] + (lc[2] - pixels[idx + 2]) * a) | 0;
+      }
+    }
+
+    // Ground light pool — screen-space radial blend around projected lamp base
+    const groundP = projectPoint(this.mvp, [lampPosWorld[0], lampPosWorld[1] + 0.02, lampPosWorld[2]], this.hw, this.hh);
+    if (groundP) {
+      const gsx = groundP[0], gsy = groundP[1], gsz = groundP[2];
+      const gr = Math.round(8 + intensity * 5);
+      const groundIntensity = intensity * 0.15;
+      for (let gy = Math.max(0, Math.floor(gsy - gr)); gy <= Math.min(h - 1, Math.ceil(gsy + gr)); gy++) {
+        for (let gx = Math.max(0, Math.floor(gsx - gr)); gx <= Math.min(w - 1, Math.ceil(gsx + gr)); gx++) {
+          const gdi = gy * w + gx;
+          if (depth[gdi] < gsz - 0.5) continue;
+          const gdx = gx - gsx, gdy = gy - gsy;
+          const gd = Math.sqrt(gdx * gdx + gdy * gdy);
+          if (gd > gr) continue;
+          const gt = 1 - gd / gr;
+          const ga = gt * gt * groundIntensity;
+          const gidx = gdi * 4;
+          pixels[gidx]     = Math.min(255, pixels[gidx]     + (lc[0] - pixels[gidx])     * ga) | 0;
+          pixels[gidx + 1] = Math.min(255, pixels[gidx + 1] + (lc[1] - pixels[gidx + 1]) * ga) | 0;
+          pixels[gidx + 2] = Math.min(255, pixels[gidx + 2] + (lc[2] - pixels[gidx + 2]) * ga) | 0;
+        }
       }
     }
   }

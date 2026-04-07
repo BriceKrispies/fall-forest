@@ -28,6 +28,7 @@ const MODES = {
     skyTint:        [0.5, 0.06, 0.02],
     creatureColor:  [200, 45, 25],
     creatureShape:  'horned',
+    lampColor:      [255, 60, 20],
     timeScale:      0,
   },
 
@@ -126,6 +127,7 @@ export class WorldMode {
       creatureColor:  mode.creatureColor  ?? null,
       creatureShape:  mode.creatureShape  ?? null,
       rainIntensity:  mode.rainIntensity  ?? 0,
+      lampColor:      mode.lampColor      ?? null,
     };
 
     // If fully blended or no snapshot, use target directly
@@ -149,6 +151,7 @@ export class WorldMode {
       skyTint:       target.skyTint,
       creatureColor: target.creatureColor,
       creatureShape: target.creatureShape,
+      lampColor:     target.lampColor,
     };
   }
 }

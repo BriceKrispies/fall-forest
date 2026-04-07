@@ -5,18 +5,21 @@ export const LAYOUT = {
   OFF_CONSTANTS: 96,
   OFF_METRICS: 128,
   OFF_TRI_IN: 256,
-  OFF_TRI_OUT: 768256,
-  OFF_LEAVES: 1728256,
-  OFF_GRASS: 1730304,
-  OFF_CREATURES: 1794304,
+  OFF_TRI_OUT: 1344256,
+  OFF_LEAVES: 2688256,
+  OFF_GRASS: 2690304,
+  OFF_CREATURES: 2754304,
   TRI_STRIDE: 48,
   LEAF_STRIDE: 32,
   GRASS_STRIDE: 32,
   CREATURE_STRIDE: 32,
-  MAX_TRIS: 16000,
+  MAX_TRIS: 28000,
   MAX_LEAVES: 64,
   MAX_GRASS: 2000,
   MAX_CREATURES: 16,
+  OFF_LIGHT_COUNT: 156,
+  OFF_LIGHTS: 160,
+  MAX_LIGHTS: 8,
 };
 
 let wasm = null;
@@ -67,6 +70,24 @@ export function uploadConstants(fogNear, fogFar, ambient) {
   f32View[off] = fogNear;
   f32View[off + 1] = fogFar;
   f32View[off + 2] = ambient;
+}
+
+/**
+ * Upload point light positions. Each light is [x, y, z, radius].
+ * Pass an empty array to clear all lights.
+ */
+export function uploadPointLights(lights) {
+  const count = Math.min(lights.length, LAYOUT.MAX_LIGHTS);
+  i32View[LAYOUT.OFF_LIGHT_COUNT >> 2] = count;
+  const base = LAYOUT.OFF_LIGHTS >> 2;
+  for (let i = 0; i < count; i++) {
+    const l = lights[i];
+    const off = base + i * 4;
+    f32View[off]     = l[0];
+    f32View[off + 1] = l[1];
+    f32View[off + 2] = l[2];
+    f32View[off + 3] = l[3];
+  }
 }
 
 export function uploadTriangles(tris) {

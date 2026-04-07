@@ -2,7 +2,7 @@ import {
   makeTreeA, makeTreeB, makeTreeC, makeBush, makeFlowerPatch,
   makeGrassClump, makeRock, makeStump, makeLog, makeGroundPatch,
   makeTreeShadow, makeRockShadow, makeStumpShadow, makeLogShadow, makeBushShadow,
-  makeFireplace, makeValleyWalls
+  makeFireplace, makeLampPost, makeValleyWalls
 } from './props.js';
 
 const PATH_COLOR_LIT = [0.6, 0.44, 0.28];
@@ -247,7 +247,12 @@ export function buildScene() {
   const fpx = 4.5, fpz = 43.5;
   tris.push(...makeFireplace(fpx, groundY(fpx, fpz), fpz));
 
+  // Lamp post in the middle of the path
+  const lpx = 1.0, lpz = 20.0;
+  tris.push(...makeLampPost(lpx, groundY(lpx, lpz), lpz));
+
   return tris;
 }
 
 export const FIREPLACE_POS = [4.5, 0, 43.5];
+export const LAMP_POS = [1.0, 0, 20.0];

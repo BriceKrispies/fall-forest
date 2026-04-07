@@ -8,7 +8,8 @@ export class FreeCamera {
     this.yaw = 0;
     this.pitch = 0;
     this.eyeHeight = 1.4;
-    this.speed = 3.0;
+    this.speed = 4.0;
+    this.sprintMultiplier = 1.8;
     this.swayTime = 0;
     this.bobPhase = 0;
     this.moving = false;
@@ -31,11 +32,11 @@ export class FreeCamera {
     const len = Math.sqrt(mx * mx + mz * mz);
     this.moving = len > 0.001;
     if (this.moving) {
-      const inv = this.speed * dt / len;
+      const spd = input.sprint ? this.speed * this.sprintMultiplier : this.speed;
+      const inv = spd * dt / len;
       this.x += mx * inv;
       this.z += mz * inv;
       this.x = clamp(this.x, -11, 11);
-      this.z = clamp(this.z, -3, 45);
     }
 
     this.swayTime += dt;

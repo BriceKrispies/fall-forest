@@ -1,14 +1,15 @@
 import { Renderer } from './renderer.js';
 import { FreeCamera } from './camera.js';
-import { buildScene, PATH_NODES, FIREPLACE_POS } from './scene.js';
 import { makeFireFlames, updateSunShadowDir } from './props.js';
 import { DayNightCycle, computeFireShadows } from './lighting.js';
-import { NightSky } from './sky.js';
-import { initWasm, getWasm, uploadMVP, uploadCamera, uploadSunDir, uploadConstants, uploadTriangles, readLeaves, readCreatures, readMetrics, uploadGrassInstances, readGrassVisible, LAYOUT, getF32 } from './wasm-bridge.js';
+import { DaySky, NightSky } from './sky.js';
+import { initWasm, getWasm, uploadMVP, uploadCamera, uploadSunDir, uploadConstants, uploadPointLights, readLeaves, readCreatures, readMetrics, readGrassVisible, LAYOUT, getF32 } from './wasm-bridge.js';
 import { WorldMode } from './world-mode.js';
 import { Rain } from './rain.js';
 import { CommandRegistry } from './commands.js';
 import { GameConsole } from './console.js';
+import { ChunkManager } from './world/chunk-manager.js';
+import { groundY } from './world/path-gen.js';
 
 const RENDER_W = 320;
 const RENDER_H = 200;
@@ -21,25 +22,22 @@ async function start() {
   const wasm = await initWasm();
 
   const renderer = new Renderer(canvas, RENDER_W, RENDER_H);
-  const camera = new FreeCamera(PATH_NODES[0]);
+  const camera = new FreeCamera([0, 0, 0]);
   const lighting = new DayNightCycle();
   const worldMode = new WorldMode();
+  const daySky = new DaySky();
   const sky = new NightSky();
   const rain = new Rain();
-  const sceneTris = buildScene();
-
-  // Objects near the fireplace that should cast fire shadows
-  const fireShadowCasters = buildFireShadowCasters();
+  const chunkManager = new ChunkManager();
 
   wasm.set_screen(RENDER_W, RENDER_H);
   uploadSunDir(lighting.sunDir);
-  uploadConstants(7, 36, 0.32);
-  uploadTriangles(sceneTris);
+  uploadConstants(10, 52, 0.32);
 
-  const grassInstances = buildGrassInstances();
-  uploadGrassInstances(grassInstances);
+  // Initial chunk load at player start position
+  chunkManager.update(camera.z);
 
-  const input = { forward: false, backward: false, left: false, right: false, dx: 0, dy: 0 };
+  const input = { forward: false, backward: false, left: false, right: false, sprint: false, dx: 0, dy: 0 };
   let locked = false;
   let lastTime = performance.now();
   let hintTimer = 0;
@@ -116,6 +114,7 @@ async function start() {
     if (e.code === 'KeyS' || e.code === 'ArrowDown') input.backward = true;
     if (e.code === 'KeyA' || e.code === 'ArrowLeft') input.left = true;
     if (e.code === 'KeyD' || e.code === 'ArrowRight') input.right = true;
+    if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') input.sprint = true;
   });
   document.addEventListener('keyup', (e) => {
     if (gameConsole.isOpen()) return;
@@ -123,6 +122,7 @@ async function start() {
     if (e.code === 'KeyS' || e.code === 'ArrowDown') input.backward = false;
     if (e.code === 'KeyA' || e.code === 'ArrowLeft') input.left = false;
     if (e.code === 'KeyD' || e.code === 'ArrowRight') input.right = false;
+    if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') input.sprint = false;
   });
 
   // Shared state for command handlers
@@ -131,6 +131,7 @@ async function start() {
     lighting,
     renderer,
     worldMode,
+    chunkManager,
     debug: false,
     debugOverlay: null,
   };
@@ -158,6 +159,34 @@ async function start() {
     }, `Activate ${name} mode`);
   }
 
+  // Register /seed command
+  commands.register('seed', (args, state) => {
+    if (!args) {
+      return `seed: 0x${state.chunkManager.worldSeed.toString(16)}`;
+    }
+    const val = parseInt(args, args.startsWith('0x') ? 16 : 10);
+    if (isNaN(val)) return 'invalid seed';
+    state.chunkManager.reset(val >>> 0);
+    state.chunkManager.update(state.camera.z);
+    return `seed: 0x${state.chunkManager.worldSeed.toString(16)}`;
+  }, 'Show or set world seed');
+
+  // Register /chunks command
+  commands.register('chunks', (args, state) => {
+    state.chunkManager.debugEnabled = !state.chunkManager.debugEnabled;
+    return `chunks debug: ${state.chunkManager.debugEnabled ? 'on' : 'off'}`;
+  }, 'Toggle chunk debug info');
+
+  // Register /tp command
+  commands.register('tp', (args, state) => {
+    const z = parseFloat(args);
+    if (isNaN(z)) return 'usage: /tp <z>';
+    state.camera.x = 0;
+    state.camera.z = z;
+    state.chunkManager.update(z);
+    return `teleported to z=${z.toFixed(1)}`;
+  }, 'Teleport to Z coordinate');
+
   let frameCount = 0;
   let fpsAccum = 0;
   let fpsDisplay = 0;
@@ -176,6 +205,9 @@ async function start() {
     const eye = camera.getEye();
     const target = camera.getTarget();
 
+    // Stream chunks around player
+    chunkManager.update(eye[2]);
+
     // Update day/night cycle (time scale controlled by active world mode)
     lighting.update(dt * worldMode.timeScale);
     worldMode.resolve(dt, lighting);
@@ -186,9 +218,15 @@ async function start() {
     updateSunShadowDir(env.sunDir);
 
     // Dynamic ambient passed to WASM
-    uploadConstants(7, 36, 0.2 + env.ambientLevel * 0.15);
+    uploadConstants(10, 52, 0.2 + env.ambientLevel * 0.15);
 
     const mvp = renderer.beginFrame(eye, target, [0, 1, 0], FOV);
+
+    // Day sky (gradient + clouds) — drawn before geometry, fades out at night
+    daySky.update(dt);
+    daySky.draw(renderer.pixels, RENDER_W, RENDER_H, mvp,
+                renderer.hw, renderer.hh, eye,
+                env.nightness, env.fogColor);
 
     // Night sky (gradient, stars, moon, meteors) — drawn before geometry
     sky.update(dt);
@@ -202,23 +240,49 @@ async function start() {
     uploadCamera(eye);
     wasm.set_time(totalTime);
 
+    // Upload point lights (fireplaces + lamps) for WASM triangle lighting
+    const fireplaces = chunkManager.getFireplaces();
+    const lamps = chunkManager.getLamps();
+    const pointLights = [];
+    for (const fp of fireplaces) {
+      pointLights.push([fp[0], groundY(fp[0], fp[2]) + 0.3, fp[2], 8.0]);
+    }
+    for (const lp of lamps) {
+      pointLights.push([lp[0], groundY(lp[0], lp[2]) + 1.86, lp[2], 6.0]);
+    }
+    uploadPointLights(pointLights);
+
     const visCount = wasm.process_triangles();
     renderer.rasterizeWasmOutput(visCount);
 
-    const fpGy = Math.sin(FIREPLACE_POS[0] * 0.3) * 0.08 + Math.cos(FIREPLACE_POS[2] * 0.25) * 0.06 +
-      Math.sin(FIREPLACE_POS[0] * 0.7 + FIREPLACE_POS[2] * 0.5) * 0.04;
-    const flames = makeFireFlames(FIREPLACE_POS[0], fpGy, FIREPLACE_POS[2], totalTime);
-    renderer.drawDynamicTris(flames, true);  // emissive — not affected by ambient
+    // Tree breathing — canopy tris with subtle vertical displacement
+    const breathingTris = chunkManager.getBreathingTris(totalTime, eye[0], eye[2]);
+    if (breathingTris.length > 0) {
+      renderer.drawDynamicTris(breathingTris, false);
+    }
 
-    // Fire shadows at night
-    const fireShadows = computeFireShadows(
-      [FIREPLACE_POS[0], fpGy, FIREPLACE_POS[2]],
-      fireShadowCasters,
-      env.nightness
-    );
-    renderer.drawFireShadows(fireShadows);
+    // Render fire flames and glow for all active fireplaces
+    for (const fp of fireplaces) {
+      const fpGy = groundY(fp[0], fp[2]);
+      const flames = makeFireFlames(fp[0], fpGy, fp[2], totalTime);
+      renderer.drawDynamicTris(flames, true);
 
-    renderer.drawFireGlow([FIREPLACE_POS[0], fpGy, FIREPLACE_POS[2]], eye);
+      const casters = chunkManager.getFireShadowCasters([fp[0], fpGy, fp[2]]);
+      const fireShadows = computeFireShadows(
+        [fp[0], fpGy, fp[2]],
+        casters,
+        env.nightness
+      );
+      renderer.drawFireShadows(fireShadows);
+
+      renderer.drawFireGlow([fp[0], fpGy, fp[2]], eye);
+    }
+
+    // Render lamp glow for all active lamps
+    for (const lp of lamps) {
+      const lpGy = groundY(lp[0], lp[2]);
+      renderer.drawLampGlow([lp[0], lpGy, lp[2]], eye, totalTime);
+    }
 
     wasm.update_leaves(dt, eye[0], eye[2], totalTime * 0.7);
     const leaves = readLeaves();
@@ -246,7 +310,7 @@ async function start() {
     renderer.endFrame();
 
     // Debug overlay update
-    if (gameState.debug) {
+    if (gameState.debug || chunkManager.debugEnabled) {
       frameCount++;
       fpsAccum += dt;
       if (fpsAccum >= 1) {
@@ -254,68 +318,30 @@ async function start() {
         frameCount = 0;
         fpsAccum = 0;
       }
-      const eye = camera.getEye();
-      debugOverlay.textContent =
+      const dbgEye = camera.getEye();
+      let text =
         `fps: ${fpsDisplay}\n` +
-        `pos: ${eye[0].toFixed(1)}, ${eye[1].toFixed(1)}, ${eye[2].toFixed(1)}\n` +
+        `pos: ${dbgEye[0].toFixed(1)}, ${dbgEye[1].toFixed(1)}, ${dbgEye[2].toFixed(1)}\n` +
         `time: ${lighting.timeOfDay.toFixed(2)}`;
+
+      if (chunkManager.debugEnabled) {
+        const info = chunkManager.getDebugInfo();
+        text += `\nseed: 0x${info.seed}` +
+                `\nchunk: ${info.currentCoord}` +
+                `\ntris: ${info.totalTris}` +
+                `\n${info.chunks.join('\n')}`;
+      }
+
+      debugOverlay.textContent = text;
+      debugOverlay.style.display = 'block';
+    } else if (!gameState.debug && !chunkManager.debugEnabled) {
+      debugOverlay.style.display = 'none';
     }
 
     requestAnimationFrame(frame);
   }
 
   requestAnimationFrame(frame);
-}
-
-// Objects near the fireplace that cast shadows from firelight
-function buildFireShadowCasters() {
-  const fpx = FIREPLACE_POS[0], fpz = FIREPLACE_POS[2];
-  const casters = [];
-
-  // Nearby trees (from scene.js tree list — objects within ~8 units of fire)
-  const nearbyTrees = [
-    [4, 41, 1.0, 3.6],    // tree near end of path
-    [3.5, 39, 0.8, 3.6],
-    [-3, 43, 1.2, 4.4],
-    [5.5, 38, 0.9, 4.0],
-  ];
-  for (const [x, z, scale, baseHeight] of nearbyTrees) {
-    const dx = x - fpx, dz = z - fpz;
-    if (Math.sqrt(dx * dx + dz * dz) > 10) continue;
-    const gy = Math.sin(x * 0.3) * 0.08 + Math.cos(z * 0.25) * 0.06 + Math.sin(x * 0.7 + z * 0.5) * 0.04;
-    casters.push({ x, z, gy, height: baseHeight * scale, radius: 1.2 * scale });
-  }
-
-  // Nearby rocks/stumps
-  const nearbySmall = [
-    [2.0, 35, 0.8, 0.25, 0.3],
-    [1.3, 36, 0.7, 0.35, 0.25],
-    [2.5, 39, 0.8, 0.25, 0.3],
-  ];
-  for (const [x, z, scale, height, radius] of nearbySmall) {
-    const gy = Math.sin(x * 0.3) * 0.08 + Math.cos(z * 0.25) * 0.06 + Math.sin(x * 0.7 + z * 0.5) * 0.04;
-    casters.push({ x, z, gy, height: height * scale, radius: radius * scale });
-  }
-
-  return casters;
-}
-
-function buildGrassInstances() {
-  const instances = [];
-  for (let z = -2; z < 44; z += 0.8) {
-    for (let x = -6; x < 6; x += 0.9) {
-      const seed = x * 100 + z * 7;
-      const ox = Math.sin(seed) * 0.3;
-      const oz = Math.cos(seed * 1.3) * 0.2;
-      const gx = x + ox;
-      const gz = z + oz;
-      const gy = Math.sin(gx * 0.3) * 0.08 + Math.cos(gz * 0.25) * 0.06 + Math.sin(gx * 0.7 + gz * 0.5) * 0.04;
-      const h = 0.12 + 0.08 * Math.sin(seed + 1.3);
-      const colorSeed = Math.abs(Math.sin(seed * 2.7));
-      instances.push([gx, gy, gz, h, colorSeed, 0]);
-    }
-  }
-  return instances;
 }
 
 start();

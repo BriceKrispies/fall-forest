@@ -237,6 +237,58 @@ export function makeTreeC(x, y, z, scale = 1, rot = 0) {
   return translate(tris, [x, y, z]);
 }
 
+// ── Layered tree builders for breathing animation ──
+// Return { trunk: tri[], canopyLayers: [{ tris: tri[], weight: 0..1 }] }
+// weight = how much this layer participates in breathing (0 = base, 1 = top)
+
+export function makeTreeALayered(x, y, z, scale = 1, rot = 0) {
+  const h = 1.8 * scale;
+  let trunk = boxTris(0, h*0.3, 0, 0.25*scale, h*0.6, 0.25*scale, TRUNK_BROWN);
+  let c0 = coneTris(0, h*0.45, 0, 1.4*scale, 1.8*scale, 6, PINE_DARK);
+  let c1 = coneTris(0, h*0.75, 0, 1.1*scale, 1.5*scale, 6, PINE_MID);
+  let c2 = coneTris(0, h*1.05, 0, 0.75*scale, 1.1*scale, 6, PINE_LIGHT);
+  trunk = translate(rotateTrisY(trunk, rot), [x, y, z]);
+  c0 = translate(rotateTrisY(c0, rot), [x, y, z]);
+  c1 = translate(rotateTrisY(c1, rot), [x, y, z]);
+  c2 = translate(rotateTrisY(c2, rot), [x, y, z]);
+  return { trunk, canopyLayers: [
+    { tris: c0, weight: 0.2 },
+    { tris: c1, weight: 0.55 },
+    { tris: c2, weight: 1.0 },
+  ]};
+}
+
+export function makeTreeBLayered(x, y, z, scale = 1, rot = 0) {
+  const h = 2.2 * scale;
+  let trunk = boxTris(0, h*0.25, 0, 0.3*scale, h*0.5, 0.3*scale, TRUNK_DARK);
+  let c0 = pyramidTris(0.15*scale, h*0.4, 0.1*scale, 1.6*scale, 2.0*scale, 5, PINE_DARK);
+  let c1 = pyramidTris(-0.1*scale, h*0.8, -0.05*scale, 1.2*scale, 1.6*scale, 5, PINE_MID);
+  let c2 = pyramidTris(0.05*scale, h*1.15, 0, 0.8*scale, 1.0*scale, 5, PINE_LIGHT);
+  trunk = translate(rotateTrisY(trunk, rot), [x, y, z]);
+  c0 = translate(rotateTrisY(c0, rot), [x, y, z]);
+  c1 = translate(rotateTrisY(c1, rot), [x, y, z]);
+  c2 = translate(rotateTrisY(c2, rot), [x, y, z]);
+  return { trunk, canopyLayers: [
+    { tris: c0, weight: 0.2 },
+    { tris: c1, weight: 0.55 },
+    { tris: c2, weight: 1.0 },
+  ]};
+}
+
+export function makeTreeCLayered(x, y, z, scale = 1, rot = 0) {
+  const h = 1.5 * scale;
+  let trunk = boxTris(0, h*0.35, 0, 0.2*scale, h*0.7, 0.2*scale, TRUNK_BROWN);
+  let c0 = coneTris(0, h*0.5, 0, 1.0*scale, 2.5*scale, 7, PINE_DARK);
+  let c1 = coneTris(0, h*1.0, 0, 0.65*scale, 1.5*scale, 7, PINE_MID);
+  trunk = translate(rotateTrisY(trunk, rot), [x, y, z]);
+  c0 = translate(rotateTrisY(c0, rot), [x, y, z]);
+  c1 = translate(rotateTrisY(c1, rot), [x, y, z]);
+  return { trunk, canopyLayers: [
+    { tris: c0, weight: 0.3 },
+    { tris: c1, weight: 1.0 },
+  ]};
+}
+
 export function makeBush(x, y, z, scale = 1, rot = 0) {
   let tris = [];
   const c = scale > 0.7 ? BUSH_GREEN : BUSH_DARK;
@@ -582,6 +634,101 @@ export function makeValleyWalls(groundY) {
     const by = groundY(bx, bz);
     tris.push(...makeRock(bx, by, bz, bs, bx * 0.7 + bz * 0.3));
   }
+
+  return tris;
+}
+
+// ── Lamp post ──
+
+const IRON_DARK = [0.18, 0.16, 0.14];
+const IRON_MID = [0.25, 0.23, 0.20];
+const IRON_LIGHT = [0.32, 0.29, 0.25];
+const GLASS_WARM = [0.85, 0.75, 0.45];
+
+function cylinderTris(cx, cy, cz, radius, height, sides, color) {
+  const tris = [];
+  for (let i = 0; i < sides; i++) {
+    const a1 = (i / sides) * Math.PI * 2;
+    const a2 = ((i + 1) / sides) * Math.PI * 2;
+    const bx1 = cx + Math.cos(a1) * radius, bz1 = cz + Math.sin(a1) * radius;
+    const bx2 = cx + Math.cos(a2) * radius, bz2 = cz + Math.sin(a2) * radius;
+    // Side faces
+    tris.push(...quad(
+      [bx1, cy, bz1], [bx2, cy, bz2],
+      [bx2, cy + height, bz2], [bx1, cy + height, bz1],
+      color
+    ));
+  }
+  return tris;
+}
+
+export function makeLampPost(x, y, z) {
+  const tris = [];
+
+  // ── Base: wide octagonal platform ──
+  tris.push(...cylinderTris(x, y, z, 0.18, 0.04, 8, IRON_DARK));
+  // Stepped base ring
+  tris.push(...cylinderTris(x, y + 0.04, z, 0.14, 0.03, 8, IRON_MID));
+  tris.push(...cylinderTris(x, y + 0.07, z, 0.10, 0.04, 8, IRON_DARK));
+
+  // ── Main stem: thin octagonal column ──
+  const stemBot = y + 0.11;
+  const stemH = 1.6;
+  tris.push(...cylinderTris(x, stemBot, z, 0.04, stemH, 8, IRON_MID));
+
+  // ── Decorative rings along the stem ──
+  const ringPositions = [0.3, 0.6, 1.0, 1.3];
+  for (const rp of ringPositions) {
+    const ry = stemBot + rp;
+    tris.push(...cylinderTris(x, ry, z, 0.055, 0.025, 8, IRON_LIGHT));
+  }
+
+  // ── Decorative midpoint bulge ──
+  const midY = stemBot + 0.75;
+  tris.push(...coneTris(x, midY, z, 0.07, 0.06, 8, IRON_LIGHT));
+  tris.push(...coneTris(x, midY + 0.06, z, 0.07, -0.06, 8, IRON_LIGHT)); // inverted cone = diamond shape
+
+  // ── Top collar under the lamp housing ──
+  const topY = stemBot + stemH;
+  tris.push(...cylinderTris(x, topY, z, 0.06, 0.02, 8, IRON_DARK));
+  tris.push(...cylinderTris(x, topY + 0.02, z, 0.08, 0.02, 8, IRON_MID));
+
+  // ── Lamp housing: four angled supports + glass panes ──
+  const housingBot = topY + 0.04;
+  const housingH = 0.22;
+
+  // Four vertical bars at corners of housing
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+    const bx = x + Math.cos(a) * 0.08;
+    const bz = z + Math.sin(a) * 0.08;
+    tris.push(...boxTris(bx, housingBot + housingH / 2, bz, 0.015, housingH, 0.015, IRON_DARK));
+  }
+
+  // Glass panels between bars (emissive warm glow color)
+  for (let i = 0; i < 4; i++) {
+    const a1 = (i / 4) * Math.PI * 2 + Math.PI / 4;
+    const a2 = ((i + 1) / 4) * Math.PI * 2 + Math.PI / 4;
+    const x1 = x + Math.cos(a1) * 0.075, z1 = z + Math.sin(a1) * 0.075;
+    const x2 = x + Math.cos(a2) * 0.075, z2 = z + Math.sin(a2) * 0.075;
+    tris.push(...quad(
+      [x1, housingBot + 0.02, z1], [x2, housingBot + 0.02, z2],
+      [x2, housingBot + housingH - 0.02, z2], [x1, housingBot + housingH - 0.02, z1],
+      GLASS_WARM
+    ));
+  }
+
+  // ── Roof cap: small pyramid on top ──
+  const roofBot = housingBot + housingH;
+  tris.push(...cylinderTris(x, roofBot, z, 0.09, 0.015, 8, IRON_DARK));
+  tris.push(...pyramidTris(x, roofBot + 0.015, z, 0.10, 0.08, 4, IRON_MID));
+
+  // ── Finial: tiny spike on top ──
+  const finialBot = roofBot + 0.095;
+  tris.push(...coneTris(x, finialBot, z, 0.015, 0.06, 6, IRON_LIGHT));
+
+  // ── Contact shadow ──
+  tris.push(...makeContactShadow(x, y, z, 0.25));
 
   return tris;
 }
