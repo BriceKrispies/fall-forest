@@ -3,12 +3,16 @@
  * Pure DOM overlay above the canvas. Does not touch the renderer.
  */
 
+import { WhisperSystem } from './console-whispers.js';
+
 export class GameConsole {
   constructor(commands) {
     this.commands = commands;
     this.open = false;
     this.gameState = null;
     this.feedbackTimer = null;
+    this.whisperTimer = null;
+    this.whispers = new WhisperSystem();
 
     this._build();
     this._bindKeys();
@@ -64,6 +68,11 @@ export class GameConsole {
     this.feedback = document.createElement('div');
     this.feedback.id = 'console-feedback';
     this.el.appendChild(this.feedback);
+
+    // Whisper line (second, delayed feedback)
+    this.whisper = document.createElement('div');
+    this.whisper.id = 'console-whisper';
+    this.el.appendChild(this.whisper);
 
     document.body.appendChild(this.el);
   }
@@ -177,6 +186,19 @@ export class GameConsole {
       this._showFeedback(result.message);
     }
 
+    // Parse command name for whisper context
+    const trimmed = raw.trim().toLowerCase();
+    const spaceIdx = trimmed.indexOf(' ');
+    const cmdName = spaceIdx === -1 ? trimmed : trimmed.slice(0, spaceIdx);
+
+    const whisperLine = this.whispers.evaluate({
+      command: cmdName,
+      ok: result ? result.ok : false,
+    });
+    if (whisperLine) {
+      this._showWhisper(whisperLine);
+    }
+
     this.input.value = '';
     this._closeConsole();
   }
@@ -197,5 +219,27 @@ export class GameConsole {
     }
     this.feedback.classList.remove('visible');
     this.feedback.textContent = '';
+    this._clearWhisper();
+  }
+
+  _showWhisper(text) {
+    this._clearWhisper();
+    // Delay the whisper so it appears after the normal feedback
+    this.whisperTimer = setTimeout(() => {
+      this.whisper.textContent = text;
+      this.whisper.classList.add('visible');
+      this.whisperTimer = setTimeout(() => {
+        this.whisper.classList.remove('visible');
+      }, 3200);
+    }, 1200);
+  }
+
+  _clearWhisper() {
+    if (this.whisperTimer) {
+      clearTimeout(this.whisperTimer);
+      this.whisperTimer = null;
+    }
+    this.whisper.classList.remove('visible');
+    this.whisper.textContent = '';
   }
 }

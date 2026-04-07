@@ -129,6 +129,21 @@ canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; 
 }
 #console-feedback.visible { opacity: 1; }
 
+/* Whisper line — delayed, softer second line */
+#console-whisper {
+  position: absolute;
+  top: 100%; right: 0; margin-top: 26px;
+  white-space: nowrap;
+  font-size: 12px;
+  font-style: italic;
+  color: rgba(255, 240, 210, 0.28);
+  opacity: 0;
+  transition: opacity 1.2s;
+  pointer-events: none;
+  letter-spacing: 0.03em;
+}
+#console-whisper.visible { opacity: 1; }
+
 /* Debug overlay */
 #debug-overlay {
   position: fixed; bottom: 56px; left: 12px;
