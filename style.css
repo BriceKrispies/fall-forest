@@ -30,3 +30,111 @@ canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; 
   #btn-fwd:active, #btn-back:active, #btn-left:active, #btn-right:active { background: rgba(255,240,210,0.18); }
   canvas { cursor: default; }
 }
+
+/* ── Console HUD ── */
+#console {
+  position: fixed; top: 12px; right: 12px;
+  z-index: 100;
+  font: 18px/1 'Georgia', serif;
+  color: rgba(255, 240, 210, 0.15);
+  display: flex; align-items: center; gap: 0;
+  pointer-events: none;
+  user-select: none; -webkit-user-select: none;
+}
+
+/* Tap target wrapper — generous hit area around the slash */
+#console-slash-wrap {
+  pointer-events: auto;
+  cursor: default;
+  padding: 12px 14px;
+  margin: -12px -14px;
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+#console-slash {
+  display: inline-block;
+  animation: console-pulse 8s ease-in-out infinite;
+  transition: color 0.4s;
+}
+#console-slash-wrap:hover #console-slash { color: rgba(255, 240, 210, 0.4); }
+#console-slash-wrap:active #console-slash { color: rgba(255, 240, 210, 0.5); }
+@keyframes console-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.65; }
+}
+
+/* Input — hidden when closed */
+#console-input {
+  width: 0; max-width: 0; opacity: 0;
+  padding: 0; margin: 0; border: none;
+  background: transparent;
+  color: rgba(255, 240, 210, 0.6);
+  font: 16px/1 'Georgia', serif;
+  outline: none;
+  border-radius: 0;
+  -webkit-appearance: none;
+  appearance: none;
+  caret-color: rgba(255, 240, 210, 0.35);
+  transition: max-width 0.15s ease-out, opacity 0.15s ease-out, padding 0.15s ease-out;
+  pointer-events: none;
+  border-bottom: 1px solid transparent;
+  /* Override body-level restrictions so mobile can type */
+  touch-action: manipulation;
+  user-select: text; -webkit-user-select: text;
+}
+.console-open #console-input {
+  width: auto; max-width: 200px; opacity: 1;
+  padding: 6px 6px 7px 6px;
+  pointer-events: auto;
+  border-bottom: 1px solid rgba(255, 240, 210, 0.12);
+  background: rgba(0, 0, 0, 0.35);
+}
+
+/* Submit button — only visible when open on touch devices */
+#console-submit {
+  display: none;
+  pointer-events: none;
+  opacity: 0;
+  border: none;
+  background: rgba(255, 240, 210, 0.08);
+  color: rgba(255, 240, 210, 0.5);
+  font: 16px/1 'Georgia', serif;
+  padding: 5px 10px;
+  margin-left: 4px;
+  border-radius: 2px;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition: opacity 0.15s;
+}
+#console-submit:active { background: rgba(255, 240, 210, 0.18); }
+@media (pointer: coarse) {
+  .console-open #console-submit {
+    display: inline-block;
+    pointer-events: auto;
+    opacity: 1;
+  }
+}
+
+/* Feedback line */
+#console-feedback {
+  position: absolute;
+  top: 100%; right: 0; margin-top: 6px;
+  white-space: nowrap;
+  font-size: 13px;
+  color: rgba(255, 240, 210, 0.45);
+  opacity: 0;
+  transition: opacity 0.6s;
+  pointer-events: none;
+}
+#console-feedback.visible { opacity: 1; }
+
+/* Debug overlay */
+#debug-overlay {
+  position: fixed; bottom: 56px; left: 12px;
+  z-index: 90;
+  font: 11px/1.4 monospace;
+  color: rgba(255, 240, 210, 0.35);
+  pointer-events: none;
+  white-space: pre;
+}

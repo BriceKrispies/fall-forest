@@ -2,7 +2,7 @@ import {
   makeTreeA, makeTreeB, makeTreeC, makeBush, makeFlowerPatch,
   makeGrassClump, makeRock, makeStump, makeLog, makeGroundPatch,
   makeTreeShadow, makeRockShadow, makeStumpShadow, makeLogShadow, makeBushShadow,
-  makeFireplace
+  makeFireplace, makeValleyWalls
 } from './props.js';
 
 const PATH_COLOR_LIT = [0.6, 0.44, 0.28];
@@ -75,6 +75,8 @@ function pushFromPath(x, z, minDist) {
 
 export function buildScene() {
   const tris = [];
+
+  tris.push(...makeValleyWalls(groundY));
 
   for (let gz = -4; gz < 46; gz += 3) {
     for (let gx = -12; gx < 12; gx += 3) {

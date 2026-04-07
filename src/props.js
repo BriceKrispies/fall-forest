@@ -1,5 +1,5 @@
 import { v3add, v3scale, vec3 } from './math.js';
-import { SUN_DIR } from './renderer.js';
+import { DEFAULT_SUN_DIR } from './renderer.js';
 
 function tri(a, b, c, color) { return [a, b, c, color]; }
 
@@ -97,8 +97,17 @@ const SHADOW_DARK = [0.1, 0.12, 0.08];
 const SHADOW_MID = [0.12, 0.15, 0.09];
 const CONTACT_DARK = [0.08, 0.09, 0.06];
 
-const SUN_FLAT_X = -SUN_DIR[0] / SUN_DIR[1];
-const SUN_FLAT_Z = -SUN_DIR[2] / SUN_DIR[1];
+// Default sun shadow projection (used for static baked shadows)
+let SUN_FLAT_X = -DEFAULT_SUN_DIR[0] / DEFAULT_SUN_DIR[1];
+let SUN_FLAT_Z = -DEFAULT_SUN_DIR[2] / DEFAULT_SUN_DIR[1];
+
+// Update the sun shadow direction dynamically
+export function updateSunShadowDir(sunDir) {
+  if (sunDir[1] > 0.03) {
+    SUN_FLAT_X = -sunDir[0] / sunDir[1];
+    SUN_FLAT_Z = -sunDir[2] / sunDir[1];
+  }
+}
 
 function shadowEllipse(cx, gy, cz, rx, rz, segs, color) {
   const tris = [];
@@ -437,6 +446,141 @@ export function makeFireFlames(x, y, z, time) {
       [fx + sway, y + 0.12 + h, fz],
       [1.0, 0.9, 0.4]
     ));
+  }
+
+  return tris;
+}
+
+const SLOPE_BASE = [0.28, 0.34, 0.18];
+const SLOPE_MID = [0.42, 0.36, 0.24];
+const SLOPE_UPPER = [0.48, 0.44, 0.38];
+const SLOPE_RIDGE = [0.38, 0.36, 0.33];
+
+const SLOPE_COLORS = [SLOPE_BASE, SLOPE_MID, SLOPE_UPPER, SLOPE_RIDGE];
+
+function makeWallStrip(x0, z0, x1, z1, outDirX, outDirZ, groundY) {
+  const tris = [];
+  const dx = x1 - x0, dz = z1 - z0;
+  const wallLen = Math.sqrt(dx * dx + dz * dz);
+  const segLen = 2;
+  const segments = Math.max(1, Math.round(wallLen / segLen));
+  const strips = 3;
+  const slopeDepth = 4;
+  const ridgeHeight = 4;
+
+  const verts = [];
+  for (let i = 0; i <= segments; i++) {
+    const t = i / segments;
+    const wx = x0 + dx * t;
+    const wz = z0 + dz * t;
+    const col = [];
+    for (let s = 0; s <= strips; s++) {
+      const f = s / strips;
+      const px = wx + outDirX * slopeDepth * f;
+      const pz = wz + outDirZ * slopeDepth * f;
+      const baseY = groundY(wx, wz);
+      const noise = Math.sin(wx * 1.7 + wz * 0.9) * 0.4 * f +
+                    Math.cos(wx * 0.8 - wz * 1.3) * 0.2 * f;
+      const py = baseY + ridgeHeight * f * f + noise;
+      col.push([px, py, pz]);
+    }
+    verts.push(col);
+  }
+
+  for (let i = 0; i < segments; i++) {
+    for (let s = 0; s < strips; s++) {
+      const a = verts[i][s];
+      const b = verts[i + 1][s];
+      const c = verts[i + 1][s + 1];
+      const d = verts[i][s + 1];
+
+      const baseColor = SLOPE_COLORS[s];
+      const variation = Math.sin(i * 3 + s * 7) * 0.02;
+      const variation2 = Math.cos(i * 5 + s * 3) * 0.02;
+      const col = [
+        baseColor[0] + variation,
+        baseColor[1] + variation2,
+        baseColor[2]
+      ];
+
+      tris.push(tri(a, c, b, col));
+      tris.push(tri(a, d, c, col));
+    }
+  }
+
+  return tris;
+}
+
+function makeCornerPiece(cx, cz, dir1X, dir1Z, dir2X, dir2Z, groundY) {
+  const tris = [];
+  const arcSegs = 3;
+  const strips = 3;
+  const slopeDepth = 4;
+  const ridgeHeight = 4;
+
+  const verts = [];
+  for (let i = 0; i <= arcSegs; i++) {
+    const t = i / arcSegs;
+    const odx = dir1X + (dir2X - dir1X) * t;
+    const odz = dir1Z + (dir2Z - dir1Z) * t;
+    const len = Math.sqrt(odx * odx + odz * odz);
+    const ndx = odx / len, ndz = odz / len;
+
+    const col = [];
+    for (let s = 0; s <= strips; s++) {
+      const f = s / strips;
+      const px = cx + ndx * slopeDepth * f;
+      const pz = cz + ndz * slopeDepth * f;
+      const baseY = groundY(cx, cz);
+      const noise = Math.sin(cx * 1.7 + cz * 0.9) * 0.4 * f;
+      const py = baseY + ridgeHeight * f * f + noise;
+      col.push([px, py, pz]);
+    }
+    verts.push(col);
+  }
+
+  for (let i = 0; i < arcSegs; i++) {
+    for (let s = 0; s < strips; s++) {
+      const a = verts[i][s];
+      const b = verts[i + 1][s];
+      const c = verts[i + 1][s + 1];
+      const d = verts[i][s + 1];
+
+      const col = SLOPE_COLORS[s];
+      tris.push(tri(a, c, b, col));
+      tris.push(tri(a, d, c, col));
+    }
+  }
+
+  return tris;
+}
+
+export function makeValleyWalls(groundY) {
+  const tris = [];
+
+  // Four wall strips
+  tris.push(...makeWallStrip(-12, -4, 12, -4, 0, -1, groundY));   // North
+  tris.push(...makeWallStrip(-12, 46, 12, 46, 0, 1, groundY));    // South
+  tris.push(...makeWallStrip(-12, -4, -12, 46, -1, 0, groundY));  // West
+  tris.push(...makeWallStrip(12, -4, 12, 46, 1, 0, groundY));     // East
+
+  // Corner pieces
+  tris.push(...makeCornerPiece(-12, -4, -1, 0, 0, -1, groundY));  // NW
+  tris.push(...makeCornerPiece(12, -4, 0, -1, 1, 0, groundY));    // NE
+  tris.push(...makeCornerPiece(-12, 46, 0, 1, -1, 0, groundY));   // SW
+  tris.push(...makeCornerPiece(12, 46, 1, 0, 0, 1, groundY));     // SE
+
+  // Scatter boulders on slopes
+  const boulderSpots = [
+    [-10, -2, 0.7], [8, -2, 0.6], [-11, 5, 0.8], [11, 10, 0.7],
+    [-10, 15, 0.6], [10, 20, 0.8], [-11, 25, 0.7], [11, 30, 0.6],
+    [-10, 35, 0.8], [10, 40, 0.7], [-9, 44, 0.6], [9, 44, 0.7],
+    [0, -3, 0.5], [5, -3, 0.6], [-5, 45, 0.7], [3, 45, 0.5],
+    [-11, 0, 0.5], [11, 8, 0.5], [-10, 42, 0.6], [10, 3, 0.6],
+  ];
+  for (const [bx, bz, bs] of boulderSpots) {
+    const by = groundY(bx, bz);
+    tris.push(...makeRock(bx, by, bz, bs, bx * 0.7 + bz * 0.3));
   }
 
   return tris;
