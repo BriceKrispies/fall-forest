@@ -25,7 +25,7 @@ async function start() {
   const lighting = new DayNightCycle();
   const worldMode = new WorldMode();
   const sky = new NightSky();
-  const rain = new Rain(RENDER_W, RENDER_H);
+  const rain = new Rain();
   const sceneTris = buildScene();
 
   // Objects near the fireplace that should cast fire shadows
@@ -238,9 +238,10 @@ async function start() {
       renderer.drawCreature(c);
     }
 
-    // Rain overlay — drawn on top of everything
-    rain.update(dt, env.rainIntensity);
-    rain.draw(renderer.pixels, RENDER_W, RENDER_H);
+    // Rain — 3D drops around camera, depth-tested against scene
+    rain.update(dt, env.rainIntensity, eye[0], eye[1], eye[2]);
+    rain.draw(renderer.pixels, RENDER_W, RENDER_H, renderer.depth,
+              mvp, renderer.hw, renderer.hh);
 
     renderer.endFrame();
 
