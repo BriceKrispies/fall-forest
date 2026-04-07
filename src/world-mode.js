@@ -57,6 +57,7 @@ const MODES = {
     ambientTint:    [0.65, 0.68, 0.75],
     nightness:      0,        // no stars/moon — overcast, not nighttime
     sunVisible:     false,
+    rainIntensity:  1.0,
     timeScale:      0,
   },
 };
@@ -114,16 +115,17 @@ export class WorldMode {
 
     // Target values: mode override ?? lighting default
     const target = {
-      fogColor:      mode.fogColor      ?? lighting.fogColor,
-      ambientLevel:  mode.ambientLevel   ?? lighting.ambientLevel,
-      ambientTint:   mode.ambientTint    ?? lighting.getAmbientTint(),
-      sunDir:        mode.sunDir         ?? lighting.sunDir,
-      sunTint:       mode.sunTint        ?? lighting.sunTint,
-      sunVisible:    mode.sunVisible     ?? lighting.sunVisible,
-      nightness:     mode.nightness      ?? lighting.nightness,
-      skyTint:       mode.skyTint        ?? null,
-      creatureColor: mode.creatureColor  ?? null,
-      creatureShape: mode.creatureShape  ?? null,
+      fogColor:       mode.fogColor       ?? lighting.fogColor,
+      ambientLevel:   mode.ambientLevel   ?? lighting.ambientLevel,
+      ambientTint:    mode.ambientTint    ?? lighting.getAmbientTint(),
+      sunDir:         mode.sunDir         ?? lighting.sunDir,
+      sunTint:        mode.sunTint        ?? lighting.sunTint,
+      sunVisible:     mode.sunVisible     ?? lighting.sunVisible,
+      nightness:      mode.nightness      ?? lighting.nightness,
+      skyTint:        mode.skyTint        ?? null,
+      creatureColor:  mode.creatureColor  ?? null,
+      creatureShape:  mode.creatureShape  ?? null,
+      rainIntensity:  mode.rainIntensity  ?? 0,
     };
 
     // If fully blended or no snapshot, use target directly
@@ -142,6 +144,7 @@ export class WorldMode {
       sunTint:       v3lerp(s.sunTint        || target.sunTint,       target.sunTint,      t),
       sunVisible:    t > 0.5 ? target.sunVisible : (s.sunVisible ?? target.sunVisible),
       nightness:     lerp(s.nightness        ?? target.nightness,     target.nightness,    t),
+      rainIntensity:  lerp(s.rainIntensity  ?? target.rainIntensity, target.rainIntensity, t),
       // Discrete fields — snap immediately
       skyTint:       target.skyTint,
       creatureColor: target.creatureColor,

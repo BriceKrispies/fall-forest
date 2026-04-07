@@ -6,6 +6,7 @@ import { DayNightCycle, computeFireShadows } from './lighting.js';
 import { NightSky } from './sky.js';
 import { initWasm, getWasm, uploadMVP, uploadCamera, uploadSunDir, uploadConstants, uploadTriangles, readLeaves, readCreatures, readMetrics, uploadGrassInstances, readGrassVisible, LAYOUT, getF32 } from './wasm-bridge.js';
 import { WorldMode } from './world-mode.js';
+import { Rain } from './rain.js';
 import { CommandRegistry } from './commands.js';
 import { GameConsole } from './console.js';
 
@@ -24,6 +25,7 @@ async function start() {
   const lighting = new DayNightCycle();
   const worldMode = new WorldMode();
   const sky = new NightSky();
+  const rain = new Rain(RENDER_W, RENDER_H);
   const sceneTris = buildScene();
 
   // Objects near the fireplace that should cast fire shadows
@@ -235,6 +237,10 @@ async function start() {
     for (const c of creatures) {
       renderer.drawCreature(c);
     }
+
+    // Rain overlay — drawn on top of everything
+    rain.update(dt, env.rainIntensity);
+    rain.draw(renderer.pixels, RENDER_W, RENDER_H);
 
     renderer.endFrame();
 
