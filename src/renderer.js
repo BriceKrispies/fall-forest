@@ -259,23 +259,26 @@ export class Renderer {
     if (!sp) return;
     const dx = firePosWorld[0] - camPos[0], dz = firePosWorld[2] - camPos[2];
     const dist = Math.sqrt(dx * dx + dz * dz);
-    if (dist > 35) return;
-    const sx = sp[0], sy = sp[1];
-    // Fire glow is much stronger at night
-    const nightBoost = 1 + this.nightness * 2.5;
-    const rangeBoost = 1 + this.nightness * 1.5;
-    const intensity = Math.max(0, 1 - dist / (20 * rangeBoost)) * nightBoost;
-    const r = Math.round((12 + intensity * 8) * rangeBoost);
+    if (dist > 30) return;
+    const sx = sp[0], sy = sp[1], sz = sp[2];
+    // Glow is stronger at night but capped to stay restrained
+    const nightBoost = 1 + this.nightness * 1.2;
+    const intensity = Math.max(0, 1 - dist / (18 * nightBoost)) * nightBoost;
+    const r = Math.round(10 + intensity * 6);
     const pixels = this.pixels;
+    const depth = this.depth;
     const w = this.w, h = this.h;
     for (let y = Math.max(0, Math.floor(sy - r)); y <= Math.min(h - 1, Math.ceil(sy + r)); y++) {
       for (let x = Math.max(0, Math.floor(sx - r)); x <= Math.min(w - 1, Math.ceil(sx + r)); x++) {
+        // Only glow on pixels at or behind the fire's depth — no bleed through geometry
+        const di = y * w + x;
+        if (depth[di] < sz - 0.5) continue;
         const ddx = x - sx, ddy = y - sy;
         const d = Math.sqrt(ddx * ddx + ddy * ddy);
         if (d > r) continue;
         const t = 1 - d / r;
         const a = t * t * intensity * 0.35;
-        const idx = (y * w + x) * 4;
+        const idx = di * 4;
         pixels[idx] = Math.min(255, pixels[idx] + (255 - pixels[idx]) * a * 1.0) | 0;
         pixels[idx + 1] = Math.min(255, pixels[idx + 1] + (180 - pixels[idx + 1]) * a * 0.7) | 0;
         pixels[idx + 2] = Math.min(255, pixels[idx + 2] + (60 - pixels[idx + 2]) * a * 0.3) | 0;
