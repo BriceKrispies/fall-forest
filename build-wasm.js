@@ -12,6 +12,10 @@ async function build() {
     const { buffer } = mod.toBinary({ write_debug_names: false });
     const outPath = path.join('wasm', name + '.wasm');
     fs.writeFileSync(outPath, buffer);
+    // Also copy to public/ so Vite includes it in the build output
+    const pubDir = path.join('public', 'wasm');
+    fs.mkdirSync(pubDir, { recursive: true });
+    fs.writeFileSync(path.join(pubDir, name + '.wasm'), buffer);
     console.log(`${file} -> ${outPath} (${buffer.byteLength} bytes)`);
     mod.destroy();
   }
