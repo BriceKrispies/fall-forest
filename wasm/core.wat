@@ -287,36 +287,32 @@
           )
         )
 
-        ;; Frustum culling — skip if projected tri is entirely off-screen
-        (if (i32.or
-          (i32.or
-            ;; all three vertices left of screen
-            (i32.and (i32.and
-              (f32.lt (local.get $p0x) (f32.const 0))
-              (f32.lt (local.get $p1x) (f32.const 0)))
-              (f32.lt (local.get $p2x) (f32.const 0)))
-            ;; all three vertices right of screen
-            (i32.and (i32.and
-              (f32.gt (local.get $p0x) (global.get $screen_w))
-              (f32.gt (local.get $p1x) (global.get $screen_w)))
-              (f32.gt (local.get $p2x) (global.get $screen_w))))
-          (i32.or
-            ;; all three vertices above screen
-            (i32.and (i32.and
-              (f32.lt (local.get $p0y) (f32.const 0))
-              (f32.lt (local.get $p1y) (f32.const 0)))
-              (f32.lt (local.get $p2y) (f32.const 0)))
-            ;; all three vertices below screen
-            (i32.and (i32.and
-              (f32.gt (local.get $p0y) (global.get $screen_h))
-              (f32.gt (local.get $p1y) (global.get $screen_h)))
-              (f32.gt (local.get $p2y) (global.get $screen_h)))))
-          (then
-            (local.set $in_off (i32.add (local.get $in_off) (i32.const 48)))
-            (local.set $i (i32.add (local.get $i) (i32.const 1)))
-            (br $loop)
-          )
-        )
+        ;; Frustum culling — DISABLED for debugging, uncomment to re-enable
+        ;; (if (i32.or
+        ;;   (i32.or
+        ;;     (i32.and (i32.and
+        ;;       (f32.lt (local.get $p0x) (f32.const 0))
+        ;;       (f32.lt (local.get $p1x) (f32.const 0)))
+        ;;       (f32.lt (local.get $p2x) (f32.const 0)))
+        ;;     (i32.and (i32.and
+        ;;       (f32.gt (local.get $p0x) (global.get $screen_w))
+        ;;       (f32.gt (local.get $p1x) (global.get $screen_w)))
+        ;;       (f32.gt (local.get $p2x) (global.get $screen_w))))
+        ;;   (i32.or
+        ;;     (i32.and (i32.and
+        ;;       (f32.lt (local.get $p0y) (f32.const 0))
+        ;;       (f32.lt (local.get $p1y) (f32.const 0)))
+        ;;       (f32.lt (local.get $p2y) (f32.const 0)))
+        ;;     (i32.and (i32.and
+        ;;       (f32.gt (local.get $p0y) (global.get $screen_h))
+        ;;       (f32.gt (local.get $p1y) (global.get $screen_h)))
+        ;;       (f32.gt (local.get $p2y) (global.get $screen_h)))))
+        ;;   (then
+        ;;     (local.set $in_off (i32.add (local.get $in_off) (i32.const 48)))
+        ;;     (local.set $i (i32.add (local.get $i) (i32.const 1)))
+        ;;     (br $loop)
+        ;;   )
+        ;; )
 
         (local.set $centx (f32.add (local.get $cx) (call $cam_x)))
         (local.set $centy (f32.div (f32.add (f32.add (local.get $v0y) (local.get $v1y)) (local.get $v2y)) (f32.const 3)))
