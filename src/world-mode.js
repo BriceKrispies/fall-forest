@@ -33,9 +33,9 @@ const MODES = {
   },
 
   dark: {
-    fogColor:       [0.04, 0.04, 0.08],
-    ambientLevel:   0.18,
-    ambientTint:    [0.35, 0.40, 0.65],
+    fogColor:       [0.06, 0.06, 0.10],
+    ambientLevel:   0.28,
+    ambientTint:    [0.4, 0.45, 0.7],
     nightness:      1.0,
     sunVisible:     false,
     skyTint:        [0.02, 0.02, 0.06],
