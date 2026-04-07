@@ -32,12 +32,12 @@ const MODES = {
   },
 
   dark: {
-    fogColor:       [0.015, 0.015, 0.035],
-    ambientLevel:   0.04,
-    ambientTint:    [0.2, 0.22, 0.5],
+    fogColor:       [0.03, 0.03, 0.06],
+    ambientLevel:   0.08,
+    ambientTint:    [0.3, 0.35, 0.6],
     nightness:      1.0,
     sunVisible:     false,
-    skyTint:        [0.01, 0.01, 0.04],
+    skyTint:        [0.02, 0.02, 0.06],
     timeScale:      0,
   },
 
