@@ -154,6 +154,7 @@ async function start() {
     horrorState,
     debug: false,
     debugOverlay: null,
+    frozen: false,
   };
   gameConsole.setGameState(gameState);
 
@@ -163,6 +164,12 @@ async function start() {
   debugOverlay.style.display = 'none';
   document.body.appendChild(debugOverlay);
   gameState.debugOverlay = debugOverlay;
+
+  // Register /freeze command
+  commands.register('freeze', (args, state) => {
+    state.frozen = !state.frozen;
+    return `simulation ${state.frozen ? 'frozen' : 'resumed'}`;
+  }, 'Freeze/resume all simulation (camera still works)');
 
   // Register /debug command
   commands.register('debug', (args, state) => {
@@ -238,7 +245,8 @@ async function start() {
   function frame(now) {
     const dt = Math.min((now - lastTime) / 1000, 0.05);
     lastTime = now;
-    totalTime += dt;
+    const simDt = gameState.frozen ? 0 : dt;
+    totalTime += simDt;
 
     if (!isTouch && !locked) {
       hintTimer += dt;
@@ -253,8 +261,8 @@ async function start() {
     chunkManager.update(eye[2]);
 
     // Update day/night cycle (time scale controlled by active world mode)
-    lighting.update(dt * worldMode.timeScale);
-    worldMode.resolve(dt, lighting);
+    lighting.update(simDt * worldMode.timeScale);
+    worldMode.resolve(simDt, lighting);
     const env = worldMode.resolved;
 
     renderer.setLighting(env);
@@ -267,13 +275,13 @@ async function start() {
     const mvp = renderer.beginFrame(eye, target, [0, 1, 0], FOV);
 
     // Day sky (gradient + clouds) — drawn before geometry, fades out at night
-    daySky.update(dt);
+    daySky.update(simDt);
     daySky.draw(renderer.pixels, RENDER_W, RENDER_H, mvp,
                 renderer.hw, renderer.hh, eye,
                 env.nightness, env.fogColor);
 
     // Night sky (gradient, stars, moon, meteors) — drawn before geometry
-    sky.update(dt);
+    sky.update(simDt);
     sky.draw(renderer.pixels, RENDER_W, RENDER_H, mvp,
              renderer.hw, renderer.hh, eye,
              env.nightness, env.sunDir, totalTime, env.skyTint);
@@ -328,19 +336,19 @@ async function start() {
       renderer.drawLampGlow([lp[0], lpGy, lp[2]], eye, totalTime);
     }
 
-    wasm.update_leaves(dt, eye[0], eye[2], totalTime * 0.7);
+    wasm.update_leaves(simDt, eye[0], eye[2], totalTime * 0.7);
     const leaves = readLeaves();
     for (const leaf of leaves) {
       renderer.drawLeafParticle(leaf);
     }
 
-    wasm.update_grass(dt, eye[0], eye[2]);
+    wasm.update_grass(simDt, eye[0], eye[2]);
     const grassBlades = readGrassVisible();
     for (const blade of grassBlades) {
       renderer.drawGrassBlade(blade);
     }
 
-    wasm.update_creatures(dt, eye[0], eye[2], totalTime * 0.3);
+    wasm.update_creatures(simDt, eye[0], eye[2], totalTime * 0.3);
     const creatures = readCreatures();
     for (const c of creatures) {
       renderer.drawCreature(c);
@@ -413,17 +421,17 @@ async function start() {
           // Normalize to [-PI, PI]
           while (diff > Math.PI) diff -= Math.PI * 2;
           while (diff < -Math.PI) diff += Math.PI * 2;
-          beh.heading += diff * Math.min(1, HORROR_TURN_SPEED * dt * 3);
+          beh.heading += diff * Math.min(1, HORROR_TURN_SPEED * simDt * 3);
         } else {
           // Wander
-          beh.wanderTimer -= dt;
+          beh.wanderTimer -= simDt;
           if (beh.wanderTimer <= 0) {
             beh.heading += (Math.random() - 0.5) * 1.6;
             beh.wanderTimer = 1.5 + Math.random() * 3;
           }
 
-          const moveX = Math.sin(beh.heading) * beh.speed * dt;
-          const moveZ = Math.cos(beh.heading) * beh.speed * dt;
+          const moveX = Math.sin(beh.heading) * beh.speed * simDt;
+          const moveZ = Math.cos(beh.heading) * beh.speed * simDt;
           const newX = ent.x + moveX;
           const newZ = ent.z + moveZ;
           const newY = groundYFast(newX, newZ) + 0.3;
@@ -445,7 +453,7 @@ async function start() {
       });
 
       // Run WASM horror simulation
-      wasm.update_horrors(dt, eye[0], eye[2]);
+      wasm.update_horrors(simDt, eye[0], eye[2]);
 
       // Render horror geometry
       renderHorrors(renderer, env);
@@ -457,7 +465,7 @@ async function start() {
     }
 
     // Rain — 3D drops around camera, depth-tested against scene
-    rain.update(dt, env.rainIntensity, eye[0], eye[1], eye[2]);
+    rain.update(simDt, env.rainIntensity, eye[0], eye[1], eye[2]);
     rain.draw(renderer.pixels, RENDER_W, RENDER_H, renderer.depth,
               mvp, renderer.hw, renderer.hh);
 
@@ -479,7 +487,8 @@ async function start() {
         `pitch: ${camera.pitch.toFixed(3)} rad (${(camera.pitch * 180 / Math.PI).toFixed(1)}°)\n` +
         `time: ${lighting.timeOfDay.toFixed(2)}\n` +
         `visTris: ${visCount}\n` +
-        `mode: ${worldMode.current} nightness: ${env.nightness.toFixed(2)}`;
+        `mode: ${worldMode.current} nightness: ${env.nightness.toFixed(2)}` +
+        (gameState.frozen ? '\n** FROZEN **' : '');
 
       // Sample pixel colors at key screen positions (after all rendering)
       const px = renderer.pixels;
