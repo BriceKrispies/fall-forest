@@ -231,7 +231,7 @@ export class Renderer {
       let minY = Math.max(0, Math.floor(Math.min(p0[1], p1[1], p2[1])));
       let maxY = Math.min(h - 1, Math.ceil(Math.max(p0[1], p1[1], p2[1])));
       if (minX > maxX || minY > maxY) continue;
-      if (maxX - minX > w || maxY - minY > h) continue;
+      if ((maxX - minX) * (maxY - minY) > 12000) continue;
       const dx01 = p1[0] - p0[0], dy01 = p1[1] - p0[1];
       const dx02 = p2[0] - p0[0], dy02 = p2[1] - p0[1];
       const denom = dx01 * dy02 - dx02 * dy01;

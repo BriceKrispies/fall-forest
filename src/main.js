@@ -145,8 +145,8 @@ async function start() {
 
   // Hell tree growth state
   let hellTreeGrowth = 0;            // current growth Y offset
-  const HELL_TREE_GROWTH_SPEED = 3.5; // units per second — moderately fast
-  const HELL_TREE_GROWTH_MAX = 40;   // grow until well out of view
+  const HELL_TREE_GROWTH_SPEED = 2.5; // units per second
+  const HELL_TREE_GROWTH_MAX = 18;   // grows past canopy view distance
 
   // Shared state for command handlers
   const gameState = {
