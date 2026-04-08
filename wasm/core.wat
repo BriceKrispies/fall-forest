@@ -28,6 +28,17 @@
   (global $OFF_CREATURES i32 (i32.const 2754304))
   (global $MAX_CREATURES i32 (i32.const 16))
 
+  ;; Horror entity system
+  (global $OFF_HORROR_CFG i32 (i32.const 2760000))    ;; 32 bytes config
+  (global $OFF_HORROR_ENT i32 (i32.const 2760032))    ;; 8 entities × 64 bytes = 512
+  (global $OFF_HORROR_SEG i32 (i32.const 2760544))    ;; 512 segments × 48 bytes = 24576
+  (global $MAX_HORROR_ENT i32 (i32.const 8))
+  (global $MAX_HORROR_SEG i32 (i32.const 512))
+  (global $HORROR_ENT_STRIDE i32 (i32.const 64))
+  (global $HORROR_SEG_STRIDE i32 (i32.const 48))
+  (global $horror_active_ent (mut i32) (i32.const 0))
+  (global $horror_active_seg (mut i32) (i32.const 0))
+
   ;; Point lights (fire/lamp): up to 8 lights, each 16 bytes (x, y, z, radius)
   ;; Count at offset 156, light data at offset 160
   (global $OFF_LIGHT_COUNT i32 (i32.const 156))
@@ -739,4 +750,313 @@
 
   (func (export "get_leaf_count") (result i32) (global.get $leaf_count))
   (func (export "get_creature_count") (result i32) (global.get $creature_count))
+
+  ;; ── Horror entity system ──
+  ;; Horror config buffer (OFF_HORROR_CFG, 32 bytes / 8 f32):
+  ;;   [0] writhing_intensity  [1] agitation  [2] pulse_speed  [3] spring_k
+  ;;   [4] damping             [5] twitch_chance  [6] _pad  [7] _pad
+
+  (func $horror_cfg (param $idx i32) (result f32)
+    (f32.load (i32.add (global.get $OFF_HORROR_CFG) (i32.mul (local.get $idx) (i32.const 4))))
+  )
+
+  ;; Pseudo-random hash for deterministic twitch/impulse
+  (func $horror_hash (param $v f32) (result f32)
+    (local $x f32)
+    (local.set $x (f32.mul (local.get $v) (f32.const 43758.5453)))
+    (f32.sub (local.get $x) (f32.trunc (local.get $x)))
+  )
+
+  ;; sin approximation (Bhaskara-style, good enough for animation)
+  (func $fsin (param $x f32) (result f32)
+    (local $xn f32)
+    ;; normalize to [-pi, pi]
+    (local.set $xn (f32.sub (local.get $x)
+      (f32.mul (f32.trunc (f32.div (local.get $x) (f32.const 6.2831853)))
+               (f32.const 6.2831853))))
+    ;; if > pi, subtract 2pi
+    (if (f32.gt (local.get $xn) (f32.const 3.1415927))
+      (then (local.set $xn (f32.sub (local.get $xn) (f32.const 6.2831853)))))
+    (if (f32.lt (local.get $xn) (f32.const -3.1415927))
+      (then (local.set $xn (f32.add (local.get $xn) (f32.const 6.2831853)))))
+    ;; parabolic approximation
+    (f32.mul (f32.mul (f32.const 1.2732395) (local.get $xn))
+      (f32.sub (f32.const 1.0)
+        (f32.mul (f32.const 0.10132) (f32.mul (local.get $xn) (local.get $xn)))))
+  )
+
+  (func $fcos (param $x f32) (result f32)
+    (call $fsin (f32.add (local.get $x) (f32.const 1.5707963)))
+  )
+
+  ;; Update all horror segments: undulation, spring, damping, twitch, pulsing
+  ;; Called once per frame from JS after horror entities have been generated
+  (func (export "update_horrors") (param $dt f32) (param $cam_x f32) (param $cam_z f32)
+    (local $i i32)
+    (local $off i32)
+    (local $x f32) (local $y f32) (local $z f32)
+    (local $rx f32) (local $ry f32) (local $rz f32)
+    (local $vx f32) (local $vy f32) (local $vz f32)
+    (local $phase f32) (local $size f32) (local $flags f32)
+    (local $parent_off i32)
+    (local $parent_idx i32)
+    (local $seg_type i32)
+    (local $entity_id i32)
+    (local $active i32)
+    (local $dx f32) (local $dy f32) (local $dz f32)
+    (local $spring_k f32) (local $damping f32) (local $writhe f32)
+    (local $pulse_speed f32) (local $agitation f32) (local $twitch f32)
+    (local $undulate f32) (local $rnd f32)
+    (local $ent_off i32) (local $ent_pulse f32) (local $ent_agit f32)
+    (local $px f32) (local $py f32) (local $pz f32)
+    (local $dist f32) (local $force f32)
+
+    ;; Read config
+    (local.set $writhe (call $horror_cfg (i32.const 0)))
+    (local.set $agitation (call $horror_cfg (i32.const 1)))
+    (local.set $pulse_speed (call $horror_cfg (i32.const 2)))
+    (local.set $spring_k (call $horror_cfg (i32.const 3)))
+    (local.set $damping (call $horror_cfg (i32.const 4)))
+    (local.set $twitch (call $horror_cfg (i32.const 5)))
+
+    ;; Update entity pulses first
+    (local.set $i (i32.const 0))
+    (block $ent_break
+      (loop $ent_loop
+        (br_if $ent_break (i32.ge_u (local.get $i) (global.get $MAX_HORROR_ENT)))
+        (local.set $ent_off (i32.add (global.get $OFF_HORROR_ENT)
+          (i32.mul (local.get $i) (global.get $HORROR_ENT_STRIDE))))
+
+        ;; Check active (offset 36 in entity = f32 index 9)
+        (if (f32.gt (f32.load (i32.add (local.get $ent_off) (i32.const 36))) (f32.const 0))
+          (then
+            ;; Advance pulse phase (offset 32 = f32 index 8)
+            (f32.store (i32.add (local.get $ent_off) (i32.const 32))
+              (f32.add
+                (f32.load (i32.add (local.get $ent_off) (i32.const 32)))
+                (f32.mul (local.get $dt) (local.get $pulse_speed))))
+
+            ;; Update agitation: decay toward base with occasional spikes
+            (local.set $ent_agit (f32.load (i32.add (local.get $ent_off) (i32.const 28))))
+            ;; Decay toward base agitation
+            (local.set $ent_agit (f32.add
+              (f32.mul (local.get $ent_agit) (f32.sub (f32.const 1.0) (f32.mul (local.get $dt) (f32.const 0.5))))
+              (f32.mul (local.get $agitation) (f32.mul (local.get $dt) (f32.const 0.5)))))
+            ;; Random twitch spikes
+            (local.set $rnd (call $horror_hash (f32.add (global.get $time)
+              (f32.mul (f32.convert_i32_u (local.get $i)) (f32.const 7.77)))))
+            (if (f32.lt (local.get $rnd) (f32.mul (local.get $twitch) (local.get $dt)))
+              (then
+                (local.set $ent_agit (f32.add (local.get $ent_agit)
+                  (f32.mul (local.get $agitation) (f32.const 3.0))))))
+            (f32.store (i32.add (local.get $ent_off) (i32.const 28)) (local.get $ent_agit))
+          )
+        )
+
+        (local.set $i (i32.add (local.get $i) (i32.const 1)))
+        (br $ent_loop)
+      )
+    )
+
+    ;; Update segments
+    (local.set $i (i32.const 0))
+    (local.set $off (global.get $OFF_HORROR_SEG))
+    (local.set $active (i32.const 0))
+
+    (block $break
+      (loop $loop
+        (br_if $break (i32.ge_u (local.get $i) (global.get $MAX_HORROR_SEG)))
+
+        ;; Read segment data
+        (local.set $x (f32.load (local.get $off)))
+        (local.set $y (f32.load (i32.add (local.get $off) (i32.const 4))))
+        (local.set $z (f32.load (i32.add (local.get $off) (i32.const 8))))
+        (local.set $rx (f32.load (i32.add (local.get $off) (i32.const 12))))
+        (local.set $ry (f32.load (i32.add (local.get $off) (i32.const 16))))
+        (local.set $rz (f32.load (i32.add (local.get $off) (i32.const 20))))
+        (local.set $vx (f32.load (i32.add (local.get $off) (i32.const 24))))
+        (local.set $vy (f32.load (i32.add (local.get $off) (i32.const 28))))
+        (local.set $vz (f32.load (i32.add (local.get $off) (i32.const 32))))
+        (local.set $phase (f32.load (i32.add (local.get $off) (i32.const 36))))
+        (local.set $size (f32.load (i32.add (local.get $off) (i32.const 40))))
+        (local.set $flags (f32.load (i32.add (local.get $off) (i32.const 44))))
+
+        ;; Decode flags: active bit is lowest bit of the i32 reinterpretation
+        ;; We use a simpler convention: flags > 0 means active
+        (if (f32.gt (local.get $flags) (f32.const 0))
+          (then
+            (local.set $active (i32.add (local.get $active) (i32.const 1)))
+
+            ;; Decode type and parent from flags
+            ;; flags encoding: type * 100000 + parent_idx * 100 + entity_id + 1
+            ;; (the +1 ensures flags > 0 for active segments)
+            (local.set $seg_type (i32.trunc_f32_u
+              (f32.trunc (f32.div (local.get $flags) (f32.const 100000)))))
+            (local.set $parent_idx (i32.trunc_f32_u
+              (f32.trunc (f32.div
+                (f32.sub (local.get $flags) (f32.mul (f32.convert_i32_u (local.get $seg_type)) (f32.const 100000)))
+                (f32.const 100)))))
+            (local.set $entity_id (i32.trunc_f32_u
+              (f32.sub
+                (f32.sub (local.get $flags)
+                  (f32.add
+                    (f32.mul (f32.convert_i32_u (local.get $seg_type)) (f32.const 100000))
+                    (f32.mul (f32.convert_i32_u (local.get $parent_idx)) (f32.const 100))))
+                (f32.const 1))))
+
+            ;; Get entity agitation and pulse
+            (local.set $ent_off (i32.add (global.get $OFF_HORROR_ENT)
+              (i32.mul (local.get $entity_id) (global.get $HORROR_ENT_STRIDE))))
+            (local.set $ent_agit (f32.load (i32.add (local.get $ent_off) (i32.const 28))))
+            (local.set $ent_pulse (f32.load (i32.add (local.get $ent_off) (i32.const 32))))
+
+            ;; Advance phase
+            (local.set $phase (f32.add (local.get $phase)
+              (f32.mul (local.get $dt) (f32.add (f32.const 1.0)
+                (f32.mul (local.get $ent_agit) (f32.const 0.5))))))
+            (f32.store (i32.add (local.get $off) (i32.const 36)) (local.get $phase))
+
+            ;; === Compute forces ===
+
+            ;; 1. Spring toward rest position
+            (local.set $dx (f32.sub (local.get $rx) (local.get $x)))
+            (local.set $dy (f32.sub (local.get $ry) (local.get $y)))
+            (local.set $dz (f32.sub (local.get $rz) (local.get $z)))
+
+            (local.set $vx (f32.add (local.get $vx)
+              (f32.mul (local.get $dx) (f32.mul (local.get $spring_k) (local.get $dt)))))
+            (local.set $vy (f32.add (local.get $vy)
+              (f32.mul (local.get $dy) (f32.mul (local.get $spring_k) (local.get $dt)))))
+            (local.set $vz (f32.add (local.get $vz)
+              (f32.mul (local.get $dz) (f32.mul (local.get $spring_k) (local.get $dt)))))
+
+            ;; 2. Undulation force (type-dependent: tendrils get phase-shifted wave)
+            ;; Types: 0=core, 1=tendril, 2=eye, 3=tooth, 4=sucker, 5=ring, 6=spine
+            (if (i32.or (i32.eq (local.get $seg_type) (i32.const 1))
+                        (i32.eq (local.get $seg_type) (i32.const 4)))
+              (then
+                ;; Tendril/sucker: lateral undulation
+                (local.set $undulate (f32.mul (local.get $writhe)
+                  (f32.mul
+                    (call $fsin (f32.add (local.get $phase) (local.get $ent_pulse)))
+                    (f32.mul (local.get $size) (f32.const 0.8)))))
+                (local.set $vx (f32.add (local.get $vx)
+                  (f32.mul (local.get $undulate) (local.get $dt))))
+                (local.set $vy (f32.add (local.get $vy)
+                  (f32.mul (f32.mul (local.get $undulate) (f32.const 0.3)) (local.get $dt))))
+              )
+            )
+            (if (i32.eq (local.get $seg_type) (i32.const 5))
+              (then
+                ;; Ring/orbit: circular motion impulse
+                (local.set $undulate (f32.mul (local.get $writhe)
+                  (call $fsin (f32.add (f32.mul (local.get $phase) (f32.const 1.5)) (local.get $ent_pulse)))))
+                (local.set $vx (f32.add (local.get $vx)
+                  (f32.mul (local.get $undulate) (local.get $dt))))
+                (local.set $vz (f32.add (local.get $vz)
+                  (f32.mul
+                    (f32.mul (local.get $writhe)
+                      (call $fcos (f32.add (f32.mul (local.get $phase) (f32.const 1.5)) (local.get $ent_pulse))))
+                    (local.get $dt))))
+              )
+            )
+
+            ;; 3. Breathing/pulsing (all types get subtle vertical pulse)
+            (local.set $vy (f32.add (local.get $vy)
+              (f32.mul
+                (f32.mul (call $fsin (f32.mul (local.get $ent_pulse) (f32.const 2.0)))
+                         (f32.const 0.15))
+                (local.get $dt))))
+
+            ;; 4. Agitation twitch (random impulse bursts)
+            (if (f32.gt (local.get $ent_agit) (f32.const 1.0))
+              (then
+                (local.set $rnd (call $horror_hash
+                  (f32.add (local.get $phase) (f32.mul (f32.convert_i32_u (local.get $i)) (f32.const 3.14)))))
+                (local.set $vx (f32.add (local.get $vx)
+                  (f32.mul (f32.sub (local.get $rnd) (f32.const 0.5))
+                    (f32.mul (local.get $ent_agit) (f32.mul (local.get $dt) (f32.const 2.0))))))
+                (local.set $rnd (call $horror_hash (f32.add (local.get $rnd) (f32.const 0.333))))
+                (local.set $vz (f32.add (local.get $vz)
+                  (f32.mul (f32.sub (local.get $rnd) (f32.const 0.5))
+                    (f32.mul (local.get $ent_agit) (f32.mul (local.get $dt) (f32.const 2.0))))))
+              )
+            )
+
+            ;; 5. Parent constraint: if parent exists, apply cohesion toward parent pos
+            (if (i32.gt_u (local.get $parent_idx) (i32.const 0))
+              (then
+                ;; parent_idx is 1-based (0 = no parent), so subtract 1
+                (local.set $parent_off (i32.add (global.get $OFF_HORROR_SEG)
+                  (i32.mul (i32.sub (local.get $parent_idx) (i32.const 1)) (global.get $HORROR_SEG_STRIDE))))
+                (local.set $px (f32.load (local.get $parent_off)))
+                (local.set $py (f32.load (i32.add (local.get $parent_off) (i32.const 4))))
+                (local.set $pz (f32.load (i32.add (local.get $parent_off) (i32.const 8))))
+                ;; Cohesion: gently pull toward parent (weaker than spring to rest)
+                (local.set $dx (f32.sub (local.get $px) (local.get $x)))
+                (local.set $dy (f32.sub (local.get $py) (local.get $y)))
+                (local.set $dz (f32.sub (local.get $pz) (local.get $z)))
+                (local.set $dist (f32.sqrt (f32.add
+                  (f32.add (f32.mul (local.get $dx) (local.get $dx))
+                           (f32.mul (local.get $dy) (local.get $dy)))
+                  (f32.mul (local.get $dz) (local.get $dz)))))
+                ;; Only apply if stretched too far (> size * 2)
+                (if (f32.gt (local.get $dist) (f32.mul (local.get $size) (f32.const 2.0)))
+                  (then
+                    (local.set $force (f32.mul
+                      (f32.sub (local.get $dist) (f32.mul (local.get $size) (f32.const 2.0)))
+                      (f32.const 3.0)))
+                    (if (f32.gt (local.get $dist) (f32.const 0.001))
+                      (then
+                        (local.set $vx (f32.add (local.get $vx)
+                          (f32.mul (f32.div (local.get $dx) (local.get $dist))
+                            (f32.mul (local.get $force) (local.get $dt)))))
+                        (local.set $vy (f32.add (local.get $vy)
+                          (f32.mul (f32.div (local.get $dy) (local.get $dist))
+                            (f32.mul (local.get $force) (local.get $dt)))))
+                        (local.set $vz (f32.add (local.get $vz)
+                          (f32.mul (f32.div (local.get $dz) (local.get $dist))
+                            (f32.mul (local.get $force) (local.get $dt)))))
+                      )
+                    )
+                  )
+                )
+              )
+            )
+
+            ;; Apply damping
+            (local.set $vx (f32.mul (local.get $vx) (f32.sub (f32.const 1.0)
+              (f32.mul (local.get $damping) (local.get $dt)))))
+            (local.set $vy (f32.mul (local.get $vy) (f32.sub (f32.const 1.0)
+              (f32.mul (local.get $damping) (local.get $dt)))))
+            (local.set $vz (f32.mul (local.get $vz) (f32.sub (f32.const 1.0)
+              (f32.mul (local.get $damping) (local.get $dt)))))
+
+            ;; Integrate position
+            (local.set $x (f32.add (local.get $x) (f32.mul (local.get $vx) (local.get $dt))))
+            (local.set $y (f32.add (local.get $y) (f32.mul (local.get $vy) (local.get $dt))))
+            (local.set $z (f32.add (local.get $z) (f32.mul (local.get $vz) (local.get $dt))))
+
+            ;; Write back
+            (f32.store (local.get $off) (local.get $x))
+            (f32.store (i32.add (local.get $off) (i32.const 4)) (local.get $y))
+            (f32.store (i32.add (local.get $off) (i32.const 8)) (local.get $z))
+            (f32.store (i32.add (local.get $off) (i32.const 24)) (local.get $vx))
+            (f32.store (i32.add (local.get $off) (i32.const 28)) (local.get $vy))
+            (f32.store (i32.add (local.get $off) (i32.const 32)) (local.get $vz))
+          )
+        )
+
+        (local.set $off (i32.add (local.get $off) (global.get $HORROR_SEG_STRIDE)))
+        (local.set $i (i32.add (local.get $i) (i32.const 1)))
+        (br $loop)
+      )
+    )
+
+    (global.set $horror_active_seg (local.get $active))
+  )
+
+  (func (export "get_horror_seg_count") (result i32) (global.get $horror_active_seg))
+  (func (export "get_horror_ent_count") (result i32) (global.get $horror_active_ent))
+  (func (export "set_horror_ent_count") (param $n i32) (global.set $horror_active_ent (local.get $n)))
 )

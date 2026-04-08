@@ -30,6 +30,20 @@ const MODES = {
     creatureShape:  'horned',
     lampColor:      [255, 60, 20],
     timeScale:      0,
+    // Horror entity system
+    horrorEnabled:          true,
+    horrorDensity:          0.8,
+    horrorComplexity:       0.8,
+    horrorSegmentBudget:    64,
+    horrorBranchDepth:      3,
+    horrorWrithingIntensity: 3.0,
+    horrorEyeDensity:       0.5,
+    horrorToothDensity:     0.4,
+    horrorSuckerDensity:    0.3,
+    horrorRingCount:        2,
+    horrorAgitation:        1.2,
+    horrorScale:            1.2,
+    horrorColorBias:        [1.0, 0.25, 0.12],
   },
 
   dark: {
@@ -128,6 +142,20 @@ export class WorldMode {
       creatureShape:  mode.creatureShape  ?? null,
       rainIntensity:  mode.rainIntensity  ?? 0,
       lampColor:      mode.lampColor      ?? null,
+      // Horror entity params (discrete — snap on mode change)
+      horrorEnabled:           mode.horrorEnabled           ?? false,
+      horrorDensity:           mode.horrorDensity           ?? 0,
+      horrorComplexity:        mode.horrorComplexity        ?? 0,
+      horrorSegmentBudget:     mode.horrorSegmentBudget     ?? 0,
+      horrorBranchDepth:       mode.horrorBranchDepth       ?? 0,
+      horrorWrithingIntensity: mode.horrorWrithingIntensity ?? 0,
+      horrorEyeDensity:        mode.horrorEyeDensity        ?? 0,
+      horrorToothDensity:      mode.horrorToothDensity      ?? 0,
+      horrorSuckerDensity:     mode.horrorSuckerDensity     ?? 0,
+      horrorRingCount:         mode.horrorRingCount         ?? 0,
+      horrorAgitation:         mode.horrorAgitation         ?? 0,
+      horrorScale:             mode.horrorScale             ?? 1,
+      horrorColorBias:         mode.horrorColorBias         ?? null,
     };
 
     // If fully blended or no snapshot, use target directly
@@ -152,6 +180,20 @@ export class WorldMode {
       creatureColor: target.creatureColor,
       creatureShape: target.creatureShape,
       lampColor:     target.lampColor,
+      // Horror params — snap at midpoint
+      horrorEnabled:           t > 0.5 ? target.horrorEnabled : (s.horrorEnabled ?? false),
+      horrorDensity:           target.horrorDensity,
+      horrorComplexity:        target.horrorComplexity,
+      horrorSegmentBudget:     target.horrorSegmentBudget,
+      horrorBranchDepth:       target.horrorBranchDepth,
+      horrorWrithingIntensity: lerp(s.horrorWrithingIntensity ?? 0, target.horrorWrithingIntensity, t),
+      horrorEyeDensity:        target.horrorEyeDensity,
+      horrorToothDensity:      target.horrorToothDensity,
+      horrorSuckerDensity:     target.horrorSuckerDensity,
+      horrorRingCount:         target.horrorRingCount,
+      horrorAgitation:         lerp(s.horrorAgitation ?? 0, target.horrorAgitation, t),
+      horrorScale:             lerp(s.horrorScale ?? 1, target.horrorScale, t),
+      horrorColorBias:         target.horrorColorBias,
     };
   }
 }

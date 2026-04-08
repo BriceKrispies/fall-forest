@@ -6,7 +6,7 @@
  */
 
 import { generateChunk } from './chunk-gen.js';
-import { groundY } from './path-gen.js';
+import { groundYFast } from './terrain.js';
 import { DEFAULT_WORLD_SEED } from './seed.js';
 import { uploadTriangles, uploadGrassInstances } from '../wasm-bridge.js';
 
@@ -108,7 +108,7 @@ export class ChunkManager {
     return this.activeBeats
       .filter(b => b.type === 'fireplace')
       .map(b => {
-        const gy = groundY(b.x, b.z);
+        const gy = groundYFast(b.x, b.z);
         return [b.x, gy, b.z];
       });
   }
@@ -118,7 +118,7 @@ export class ChunkManager {
     return this.activeBeats
       .filter(b => b.type === 'lamp')
       .map(b => {
-        const gy = groundY(b.x, b.z);
+        const gy = groundYFast(b.x, b.z);
         return [b.x, gy, b.z];
       });
   }
@@ -134,7 +134,7 @@ export class ChunkManager {
         const dx = tree.x - fpx, dz = tree.z - fpz;
         const dist = Math.sqrt(dx * dx + dz * dz);
         if (dist > 10) continue;
-        const gy = groundY(tree.x, tree.z);
+        const gy = groundYFast(tree.x, tree.z);
         casters.push({
           x: tree.x,
           z: tree.z,

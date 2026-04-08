@@ -8,14 +8,12 @@
  */
 
 import { createRNG, hashCoord } from './seed.js';
+import { groundY, groundYFast } from './terrain.js';
 
 const NODES_PER_CHUNK = 5;
 
-// Shared ground-height function (same as scene.js / camera.js)
-export function groundY(x, z) {
-  return Math.sin(x * 0.3) * 0.08 + Math.cos(z * 0.25) * 0.06 +
-    Math.sin(x * 0.7 + z * 0.5) * 0.04;
-}
+// Re-export for consumers that import groundY from here
+export { groundY, groundYFast };
 
 /**
  * Compute the boundary path point at the seam between chunk `coord` and `coord+1`.

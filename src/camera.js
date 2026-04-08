@@ -1,4 +1,5 @@
 import { clamp } from './math.js';
+import { groundYFast } from './world/terrain.js';
 
 export class FreeCamera {
   constructor(startPos) {
@@ -42,9 +43,7 @@ export class FreeCamera {
     this.swayTime += dt;
     if (this.moving) this.bobPhase += dt * 8;
 
-    const gy = Math.sin(this.x * 0.3) * 0.08 + Math.cos(this.z * 0.25) * 0.06 +
-      Math.sin(this.x * 0.7 + this.z * 0.5) * 0.04;
-    this.y = gy;
+    this.y = groundYFast(this.x, this.z);
   }
 
   getEye() {

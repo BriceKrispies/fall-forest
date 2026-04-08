@@ -20,6 +20,14 @@ export const LAYOUT = {
   OFF_LIGHT_COUNT: 156,
   OFF_LIGHTS: 160,
   MAX_LIGHTS: 8,
+  // Horror entity system
+  OFF_HORROR_CFG: 2760000,
+  OFF_HORROR_ENT: 2760032,
+  OFF_HORROR_SEG: 2760544,
+  MAX_HORROR_ENT: 8,
+  MAX_HORROR_SEG: 512,
+  HORROR_ENT_STRIDE: 64,  // 16 f32
+  HORROR_SEG_STRIDE: 48,  // 12 f32
 };
 
 let wasm = null;
@@ -198,4 +206,157 @@ export function readCreatures() {
     });
   }
   return result;
+}
+
+// ── Horror entity system ──
+
+/**
+ * Upload horror simulation config to WASM.
+ * @param {object} cfg - { writhe, agitation, pulseSpeed, springK, damping, twitchChance }
+ */
+export function uploadHorrorConfig(cfg) {
+  const base = LAYOUT.OFF_HORROR_CFG >> 2;
+  f32View[base]     = cfg.writhe || 0;
+  f32View[base + 1] = cfg.agitation || 0;
+  f32View[base + 2] = cfg.pulseSpeed || 1;
+  f32View[base + 3] = cfg.springK || 8;
+  f32View[base + 4] = cfg.damping || 4;
+  f32View[base + 5] = cfg.twitchChance || 0;
+  f32View[base + 6] = 0;
+  f32View[base + 7] = 0;
+}
+
+/**
+ * Write an entity header into WASM memory.
+ * @param {number} idx - entity index (0–7)
+ * @param {object} ent - entity data
+ */
+export function writeHorrorEntity(idx, ent) {
+  if (idx >= LAYOUT.MAX_HORROR_ENT) return;
+  const base = (LAYOUT.OFF_HORROR_ENT >> 2) + idx * 16;
+  f32View[base]      = ent.x;
+  f32View[base + 1]  = ent.y;
+  f32View[base + 2]  = ent.z;
+  f32View[base + 3]  = ent.life || 30;
+  f32View[base + 4]  = ent.seed || 0;
+  f32View[base + 5]  = ent.segStart || 0;
+  f32View[base + 6]  = ent.segCount || 0;
+  f32View[base + 7]  = ent.agitation || 0;
+  f32View[base + 8]  = ent.pulsePhase || 0;
+  f32View[base + 9]  = ent.active ? 1 : 0;
+  f32View[base + 10] = ent.scale || 1;
+  f32View[base + 11] = 0; // cam_dx (updated per frame)
+  f32View[base + 12] = 0; // cam_dz
+  f32View[base + 13] = 0;
+  f32View[base + 14] = 0;
+  f32View[base + 15] = 0;
+}
+
+/**
+ * Write a segment into WASM memory.
+ * @param {number} idx - segment index (0–511)
+ * @param {object} seg - segment data
+ */
+export function writeHorrorSegment(idx, seg) {
+  if (idx >= LAYOUT.MAX_HORROR_SEG) return;
+  const base = (LAYOUT.OFF_HORROR_SEG >> 2) + idx * 12;
+  f32View[base]      = seg.x;       // current pos
+  f32View[base + 1]  = seg.y;
+  f32View[base + 2]  = seg.z;
+  f32View[base + 3]  = seg.x;       // rest pos = initial pos
+  f32View[base + 4]  = seg.y;
+  f32View[base + 5]  = seg.z;
+  f32View[base + 6]  = 0;           // velocity
+  f32View[base + 7]  = 0;
+  f32View[base + 8]  = 0;
+  f32View[base + 9]  = seg.phase || 0;
+  f32View[base + 10] = seg.size || 0.1;
+  // Encode flags: type * 100000 + parent_idx_1based * 100 + entity_id + 1
+  f32View[base + 11] = seg.type * 100000 + (seg.parentIdx + 1) * 100 + seg.entityId + 1;
+}
+
+/**
+ * Read all active horror segments from WASM memory.
+ * Returns array of segment objects for rendering.
+ */
+export function readHorrorSegments() {
+  const base = LAYOUT.OFF_HORROR_SEG >> 2;
+  const result = [];
+  for (let i = 0; i < LAYOUT.MAX_HORROR_SEG; i++) {
+    const off = base + i * 12;
+    const flags = f32View[off + 11];
+    if (flags <= 0) continue;
+    const segType = Math.floor(flags / 100000);
+    const remainder = flags - segType * 100000;
+    const parentIdx1 = Math.floor(remainder / 100);
+    const entPlusOne = remainder - parentIdx1 * 100;
+    result.push({
+      idx: i,
+      x: f32View[off], y: f32View[off + 1], z: f32View[off + 2],
+      restX: f32View[off + 3], restY: f32View[off + 4], restZ: f32View[off + 5],
+      vx: f32View[off + 6], vy: f32View[off + 7], vz: f32View[off + 8],
+      phase: f32View[off + 9],
+      size: f32View[off + 10],
+      type: segType,
+      parentIdx: parentIdx1 - 1,  // back to 0-based, -1 = no parent
+      entityId: Math.round(entPlusOne - 1),
+    });
+  }
+  return result;
+}
+
+/**
+ * Read horror entity headers from WASM memory.
+ */
+export function readHorrorEntities() {
+  const base = LAYOUT.OFF_HORROR_ENT >> 2;
+  const result = [];
+  const count = wasm.get_horror_ent_count();
+  for (let i = 0; i < count; i++) {
+    const off = base + i * 16;
+    if (f32View[off + 9] <= 0) continue; // not active
+    result.push({
+      idx: i,
+      x: f32View[off], y: f32View[off + 1], z: f32View[off + 2],
+      segStart: f32View[off + 5],
+      segCount: f32View[off + 6],
+    });
+  }
+  return result;
+}
+
+/**
+ * Move a horror entity and all its segments by a delta.
+ */
+export function moveHorrorEntity(entIdx, dx, dy, dz) {
+  const entBase = (LAYOUT.OFF_HORROR_ENT >> 2) + entIdx * 16;
+  f32View[entBase]     += dx;
+  f32View[entBase + 1] += dy;
+  f32View[entBase + 2] += dz;
+
+  const segStart = Math.round(f32View[entBase + 5]);
+  const segCount = Math.round(f32View[entBase + 6]);
+  const segBase = LAYOUT.OFF_HORROR_SEG >> 2;
+
+  for (let i = 0; i < segCount; i++) {
+    const off = segBase + (segStart + i) * 12;
+    if (f32View[off + 11] <= 0) continue;
+    // current pos
+    f32View[off]     += dx;
+    f32View[off + 1] += dy;
+    f32View[off + 2] += dz;
+    // rest pos
+    f32View[off + 3] += dx;
+    f32View[off + 4] += dy;
+    f32View[off + 5] += dz;
+  }
+}
+
+/**
+ * Clear all horror data from WASM memory.
+ */
+export function clearHorrorBuffers() {
+  const start = LAYOUT.OFF_HORROR_CFG >> 2;
+  const end = (LAYOUT.OFF_HORROR_SEG + LAYOUT.MAX_HORROR_SEG * LAYOUT.HORROR_SEG_STRIDE) >> 2;
+  for (let i = start; i < end; i++) f32View[i] = 0;
 }

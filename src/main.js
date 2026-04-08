@@ -3,13 +3,15 @@ import { FreeCamera } from './camera.js';
 import { makeFireFlames, updateSunShadowDir } from './props.js';
 import { DayNightCycle, computeFireShadows } from './lighting.js';
 import { DaySky, NightSky } from './sky.js';
-import { initWasm, getWasm, uploadMVP, uploadCamera, uploadSunDir, uploadConstants, uploadPointLights, readLeaves, readCreatures, readMetrics, readGrassVisible, LAYOUT, getF32 } from './wasm-bridge.js';
+import { initWasm, getWasm, uploadMVP, uploadCamera, uploadSunDir, uploadConstants, uploadPointLights, readLeaves, readCreatures, readMetrics, readGrassVisible, LAYOUT, getF32, uploadHorrorConfig, clearHorrorBuffers, readHorrorEntities, moveHorrorEntity } from './wasm-bridge.js';
 import { WorldMode } from './world-mode.js';
 import { Rain } from './rain.js';
 import { CommandRegistry } from './commands.js';
 import { GameConsole } from './console.js';
 import { ChunkManager } from './world/chunk-manager.js';
-import { groundY } from './world/path-gen.js';
+import { groundYFast } from './world/terrain.js';
+import { generateAllHorrors } from './horror-gen.js';
+import { renderHorrors, renderHorrorDebug } from './horror-renderer.js';
 
 const RENDER_W = 320;
 const RENDER_H = 200;
@@ -125,6 +127,22 @@ async function start() {
     if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') input.sprint = false;
   });
 
+  // Horror subsystem state
+  const horrorState = {
+    enabled: false,       // overridden by world mode, but can be toggled manually
+    debugEnabled: false,
+    generated: false,     // true when horrors have been generated for current mode
+    lastMode: null,       // track mode changes to regenerate
+    spawnSeed: 0,         // seed used for last generation
+    // Per-entity movement/behavior state
+    entities: [],         // { heading, speed, wanderTimer, frozen }
+  };
+
+  const HORROR_FREEZE_DIST = 4.0;   // distance at which monsters freeze
+  const HORROR_RESUME_DIST = 6.0;   // distance at which they resume
+  const HORROR_WANDER_SPEED = 0.4;
+  const HORROR_TURN_SPEED = 2.0;
+
   // Shared state for command handlers
   const gameState = {
     camera,
@@ -132,6 +150,7 @@ async function start() {
     renderer,
     worldMode,
     chunkManager,
+    horrorState,
     debug: false,
     debugOverlay: null,
   };
@@ -186,6 +205,30 @@ async function start() {
     state.chunkManager.update(z);
     return `teleported to z=${z.toFixed(1)}`;
   }, 'Teleport to Z coordinate');
+
+  // Register /horror command
+  commands.register('horror', (args, state) => {
+    const arg = (args || '').trim().toLowerCase();
+    if (arg === 'on') {
+      state.horrorState.enabled = true;
+      state.horrorState.generated = false;
+      return 'horror: on';
+    }
+    if (arg === 'off') {
+      state.horrorState.enabled = false;
+      clearHorrorBuffers();
+      return 'horror: off';
+    }
+    if (arg === 'debug') {
+      state.horrorState.debugEnabled = !state.horrorState.debugEnabled;
+      return `horror debug: ${state.horrorState.debugEnabled ? 'on' : 'off'}`;
+    }
+    if (arg === 'regen') {
+      state.horrorState.generated = false;
+      return 'horror: regenerating';
+    }
+    return `horror: ${state.horrorState.enabled ? 'on' : 'off'}`;
+  }, 'Horror entity control');
 
   let frameCount = 0;
   let fpsAccum = 0;
@@ -245,10 +288,10 @@ async function start() {
     const lamps = chunkManager.getLamps();
     const pointLights = [];
     for (const fp of fireplaces) {
-      pointLights.push([fp[0], groundY(fp[0], fp[2]) + 0.3, fp[2], 8.0]);
+      pointLights.push([fp[0], groundYFast(fp[0], fp[2]) + 0.3, fp[2], 8.0]);
     }
     for (const lp of lamps) {
-      pointLights.push([lp[0], groundY(lp[0], lp[2]) + 1.86, lp[2], 6.0]);
+      pointLights.push([lp[0], groundYFast(lp[0], lp[2]) + 1.86, lp[2], 6.0]);
     }
     uploadPointLights(pointLights);
 
@@ -263,7 +306,7 @@ async function start() {
 
     // Render fire flames and glow for all active fireplaces
     for (const fp of fireplaces) {
-      const fpGy = groundY(fp[0], fp[2]);
+      const fpGy = groundYFast(fp[0], fp[2]);
       const flames = makeFireFlames(fp[0], fpGy, fp[2], totalTime);
       renderer.drawDynamicTris(flames, true);
 
@@ -280,7 +323,7 @@ async function start() {
 
     // Render lamp glow for all active lamps
     for (const lp of lamps) {
-      const lpGy = groundY(lp[0], lp[2]);
+      const lpGy = groundYFast(lp[0], lp[2]);
       renderer.drawLampGlow([lp[0], lpGy, lp[2]], eye, totalTime);
     }
 
@@ -300,6 +343,116 @@ async function start() {
     const creatures = readCreatures();
     for (const c of creatures) {
       renderer.drawCreature(c);
+    }
+
+    // ── Horror entities ──
+    // Determine if horror is active (world mode or manual override)
+    const horrorActive = env.horrorEnabled || horrorState.enabled;
+
+    if (horrorActive) {
+      // Regenerate if mode changed or not yet generated
+      const modeKey = worldMode.current;
+      if (!horrorState.generated || horrorState.lastMode !== modeKey) {
+        // Generate horror spawn positions around camera
+        const spawnCount = Math.max(1, Math.floor((env.horrorDensity || 0.5) * LAYOUT.MAX_HORROR_ENT));
+        const spawnSeed = (chunkManager.worldSeed ^ (modeKey.charCodeAt(0) * 31337)) >>> 0;
+        const positions = [];
+        for (let i = 0; i < spawnCount; i++) {
+          const hash = (spawnSeed + i * 2654435761) >>> 0;
+          const angle = ((hash & 0xFFFF) / 0xFFFF) * Math.PI * 2;
+          const dist = 3 + ((hash >>> 16) / 0xFFFF) * 5;
+          const sx = eye[0] + Math.cos(angle) * dist;
+          const sz = eye[2] + Math.sin(angle) * dist;
+          const sy = groundYFast(sx, sz) + 0.3 + ((hash >>> 8 & 0xFF) / 255) * 0.5;
+          positions.push({ x: sx, y: sy, z: sz, seed: hash });
+        }
+        generateAllHorrors(env, positions, wasm);
+        horrorState.generated = true;
+        horrorState.lastMode = modeKey;
+        horrorState.spawnSeed = spawnSeed;
+        horrorState.entities = []; // reset behavior state for fresh generation
+      }
+
+      // Initialize entity behavior state when freshly generated
+      if (horrorState.entities.length === 0 || horrorState.entities.length !== wasm.get_horror_ent_count()) {
+        const count = wasm.get_horror_ent_count();
+        horrorState.entities = [];
+        for (let i = 0; i < count; i++) {
+          const hash = (horrorState.spawnSeed + i * 7919) >>> 0;
+          horrorState.entities.push({
+            heading: ((hash & 0xFFFF) / 0xFFFF) * Math.PI * 2,
+            speed: HORROR_WANDER_SPEED * (0.6 + ((hash >>> 16) / 0xFFFF) * 0.8),
+            wanderTimer: ((hash >>> 8) & 0xFF) / 255 * 3,
+            frozen: false,
+          });
+        }
+      }
+
+      // Update entity movement / freeze behavior
+      const ents = readHorrorEntities();
+      for (const ent of ents) {
+        const beh = horrorState.entities[ent.idx];
+        if (!beh) continue;
+
+        const dx = eye[0] - ent.x;
+        const dz = eye[2] - ent.z;
+        const distSq = dx * dx + dz * dz;
+        const dist = Math.sqrt(distSq);
+
+        if (!beh.frozen && dist < HORROR_FREEZE_DIST) {
+          beh.frozen = true;
+        } else if (beh.frozen && dist > HORROR_RESUME_DIST) {
+          beh.frozen = false;
+        }
+
+        if (beh.frozen) {
+          // Turn to face the player
+          const targetHeading = Math.atan2(dx, dz);
+          let diff = targetHeading - beh.heading;
+          // Normalize to [-PI, PI]
+          while (diff > Math.PI) diff -= Math.PI * 2;
+          while (diff < -Math.PI) diff += Math.PI * 2;
+          beh.heading += diff * Math.min(1, HORROR_TURN_SPEED * dt * 3);
+        } else {
+          // Wander
+          beh.wanderTimer -= dt;
+          if (beh.wanderTimer <= 0) {
+            beh.heading += (Math.random() - 0.5) * 1.6;
+            beh.wanderTimer = 1.5 + Math.random() * 3;
+          }
+
+          const moveX = Math.sin(beh.heading) * beh.speed * dt;
+          const moveZ = Math.cos(beh.heading) * beh.speed * dt;
+          const newX = ent.x + moveX;
+          const newZ = ent.z + moveZ;
+          const newY = groundYFast(newX, newZ) + 0.3;
+          const dy = newY - ent.y;
+
+          moveHorrorEntity(ent.idx, moveX, dy, moveZ);
+        }
+      }
+
+      // Upload simulation config from resolved world mode params
+      // Reduce writhing when frozen near player for creepy stillness
+      uploadHorrorConfig({
+        writhe: env.horrorWrithingIntensity || 1,
+        agitation: env.horrorAgitation || 0.5,
+        pulseSpeed: 1.5,
+        springK: 8,
+        damping: 4,
+        twitchChance: 0.3,
+      });
+
+      // Run WASM horror simulation
+      wasm.update_horrors(dt, eye[0], eye[2]);
+
+      // Render horror geometry
+      renderHorrors(renderer, env);
+
+      // Debug overlay
+      if (horrorState.debugEnabled) {
+        renderHorrorDebug(renderer);
+      }
     }
 
     // Rain — 3D drops around camera, depth-tested against scene
@@ -330,6 +483,12 @@ async function start() {
                 `\nchunk: ${info.currentCoord}` +
                 `\ntris: ${info.totalTris}` +
                 `\n${info.chunks.join('\n')}`;
+      }
+
+      if (horrorState.debugEnabled) {
+        const hEntCount = wasm.get_horror_ent_count();
+        const hSegCount = wasm.get_horror_seg_count();
+        text += `\nhorror: ${hEntCount} ent, ${hSegCount} seg`;
       }
 
       debugOverlay.textContent = text;

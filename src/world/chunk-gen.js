@@ -7,7 +7,8 @@
  */
 
 import { createRNG, hashCoord } from './seed.js';
-import { generatePathNodes, groundY } from './path-gen.js';
+import { generatePathNodes } from './path-gen.js';
+import { groundY, setContext, clearContext, groundColor, getZone } from './terrain.js';
 import {
   makeTreeA, makeTreeB, makeTreeC, makeBush, makeFlowerPatch,
   makeGrassClump, makeRock, makeStump, makeLog, makeGroundPatch,
@@ -138,65 +139,31 @@ export function generateChunk(worldSeed, coord, chunkDepth) {
   const tris = [];
   const scenicBeats = [];
 
-  // ── Valley walls (east/west sides for this chunk's Z range) ──
-  tris.push(...makeWallSection(-12, zMin, -12, zMax, -1, 0));
-  tris.push(...makeWallSection(12, zMin, 12, zMax, 1, 0));
-  // Slope boulders on walls
+  // ── Phase 1: Determine feature positions (before terrain context) ──
+  // We need to know where features go so the terrain can deform around them.
+  // Consume RNG in the same order as before to keep determinism.
+
+  const features = []; // { x, z, type } for terrain influence
+
+  // Slope boulders (wall-side, not tracked as features)
+  const wallBoulders = [];
   for (let i = 0; i < 4; i++) {
     const bx = rng.pick([-10, -11, 10, 11]);
     const bz = rng.range(zMin + 1, zMax - 1);
     const bs = rng.range(0.5, 0.8);
-    tris.push(...makeRock(bx, groundY(bx, bz), bz, bs, rng.range(0, 6.28)));
+    const brot = rng.range(0, 6.28);
+    wallBoulders.push({ x: bx, z: bz, scale: bs, rot: brot });
   }
 
-  // ── Ground patches ──
-  for (let gz = zMin; gz < zMax; gz += 3) {
-    for (let gx = -12; gx < 12; gx += 3) {
-      const expo = sunExposure(gx, gz);
-      const isAlt = ((gx | 0) + (gz | 0)) % 2 === 0;
-      const c = isAlt
-        ? lerpColor(GROUND_GREEN_SHADE, GROUND_GREEN_LIT, expo)
-        : lerpColor(GROUND_MOSS_SHADE, GROUND_MOSS_LIT, expo);
-      tris.push(...makeGroundPatch(gx, gz, 3.2, 3.2, groundY, c));
-    }
+  // Tree positions
+  const treePlacements = [];
+
+  function planTree(type, x, z, scale, rot) {
+    treePlacements.push({ type, x, z, scale, rot });
+    features.push({ x, z, type: 'tree' });
   }
 
-  // ── Path surface ──
-  for (let i = 0; i < pathNodes.length - 1; i++) {
-    const a = pathNodes[i], b = pathNodes[i + 1];
-    const steps = 4;
-    for (let s = 0; s < steps; s++) {
-      const t = s / steps;
-      const px = a[0] + (b[0] - a[0]) * t;
-      const pz = a[2] + (b[2] - a[2]) * t;
-      const py = groundY(px, pz) + 0.02;
-      const expo = sunExposure(px, pz);
-      const c = s % 2 === 0
-        ? lerpColor(PATH_COLOR_SHADE, PATH_COLOR_LIT, expo)
-        : lerpColor(DIRT_COLOR_SHADE, DIRT_COLOR_LIT, expo);
-      tris.push(...makeGroundPatch(px, pz, 1.6, 1.0, () => py, c));
-    }
-  }
-
-  // ── Trees ──
-  // Tree instances stored for breathing animation
-  const trees = [];
-
-  function placeTree(type, x, z, scale, rot) {
-    const gy = groundY(x, z);
-    tris.push(...makeTreeShadow(x, gy, z, TREE_HEIGHTS[type], TREE_CANOPY[type], scale));
-    const layered = TREE_LAYERED[type](x, gy, z, scale, rot);
-    tris.push(...layered.trunk);
-    trees.push({
-      x, z, type, scale,
-      canopyLayers: layered.canopyLayers,
-      phase: rng.range(0, 6.28),
-      speed: rng.range(0.4, 0.7),
-      amplitude: rng.range(0.012, 0.025),
-    });
-  }
-
-  // Outer ring (dense canopy at corridor edges)
+  // Outer ring
   const outerTreeCount = Math.round(chunkDepth / 2);
   for (let i = 0; i < outerTreeCount; i++) {
     const type = rng.pick(TREE_TYPES);
@@ -204,10 +171,10 @@ export function generateChunk(worldSeed, coord, chunkDepth) {
     const rawX = side * rng.range(3, 7);
     const z = rng.range(zMin + 0.5, zMax - 0.5);
     const x = pushFromPath(rawX, z, MIN_TREE_DIST, pathNodes);
-    placeTree(type, x, z, rng.range(0.8, 1.5), rng.range(0, 6.28));
+    planTree(type, x, z, rng.range(0.8, 1.5), rng.range(0, 6.28));
   }
 
-  // Inner trees (closer to path, smaller)
+  // Inner trees
   const innerTreeCount = Math.round(chunkDepth / 3);
   for (let i = 0; i < innerTreeCount; i++) {
     const type = rng.pick(TREE_TYPES);
@@ -215,20 +182,21 @@ export function generateChunk(worldSeed, coord, chunkDepth) {
     const rawX = side * rng.range(2, 3.5);
     const z = rng.range(zMin + 0.5, zMax - 0.5);
     const x = pushFromPath(rawX, z, MIN_TREE_DIST, pathNodes);
-    placeTree(type, x, z, rng.range(0.6, 0.8), rng.range(0, 6.28));
+    planTree(type, x, z, rng.range(0.6, 0.8), rng.range(0, 6.28));
   }
 
-  // Far-edge trees (big, behind the wall line)
+  // Far-edge trees
   const farTreeCount = Math.round(chunkDepth / 4);
   for (let i = 0; i < farTreeCount; i++) {
     const type = rng.pick(TREE_TYPES);
     const side = rng.next() > 0.5 ? 1 : -1;
     const x = side * rng.range(7, 8.5);
     const z = rng.range(zMin + 1, zMax - 1);
-    placeTree(type, x, z, rng.range(1.3, 1.6), rng.range(0, 6.28));
+    planTree(type, x, z, rng.range(1.3, 1.6), rng.range(0, 6.28));
   }
 
-  // ── Bushes ──
+  // Bush positions (not tracked as features — too small)
+  const bushPlacements = [];
   const bushCount = Math.round(chunkDepth / 1.2);
   for (let i = 0; i < bushCount; i++) {
     const side = rng.next() > 0.5 ? 1 : -1;
@@ -237,35 +205,34 @@ export function generateChunk(worldSeed, coord, chunkDepth) {
     const x = pushFromPath(rawX, z, MIN_BUSH_DIST, pathNodes);
     const scale = rng.range(0.5, 1.1);
     const rot = rng.range(0, 6.28);
-    const gy = groundY(x, z);
-    tris.push(...makeBushShadow(x, gy, z, scale));
-    tris.push(...makeBush(x, gy, z, scale, rot));
+    bushPlacements.push({ x, z, scale, rot });
   }
 
-  // ── Rocks ──
+  // Rock positions
+  const rockPlacements = [];
   const rockCount = Math.round(chunkDepth / 2.5);
   for (let i = 0; i < rockCount; i++) {
     const x = rng.range(-2.5, 2.5);
     const z = rng.range(zMin + 0.5, zMax - 0.5);
     const scale = rng.range(0.3, 0.8);
     const rot = rng.range(0, 6.28);
-    const gy = groundY(x, z);
-    tris.push(...makeRockShadow(x, gy, z, scale));
-    tris.push(...makeRock(x, gy, z, scale, rot));
+    rockPlacements.push({ x, z, scale, rot });
+    features.push({ x, z, type: 'rock' });
   }
 
-  // ── Stumps ──
+  // Stump positions
+  const stumpPlacements = [];
   const stumpCount = Math.round(chunkDepth / 8);
   for (let i = 0; i < stumpCount; i++) {
     const x = rng.range(-2, 2);
     const z = rng.range(zMin + 1, zMax - 1);
     const scale = rng.range(0.7, 0.9);
-    const gy = groundY(x, z);
-    tris.push(...makeStumpShadow(x, gy, z, scale));
-    tris.push(...makeStump(x, gy, z, scale));
+    stumpPlacements.push({ x, z, scale });
+    features.push({ x, z, type: 'stump' });
   }
 
-  // ── Logs ──
+  // Log positions
+  const logPlacements = [];
   const logCount = Math.round(chunkDepth / 10);
   for (let i = 0; i < logCount; i++) {
     const x = rng.range(-2, 2);
@@ -273,12 +240,12 @@ export function generateChunk(worldSeed, coord, chunkDepth) {
     const len = rng.range(1.0, 1.4);
     const scale = rng.range(0.7, 0.8);
     const rot = rng.range(0, 6.28);
-    const gy = groundY(x, z);
-    tris.push(...makeLogShadow(x, gy, z, len, scale, rot));
-    tris.push(...makeLog(x, gy, z, len, scale, rot));
+    logPlacements.push({ x, z, len, scale, rot });
+    features.push({ x, z, type: 'log' });
   }
 
-  // ── Flowers ──
+  // Flower positions (consume RNG in same order)
+  const flowerPlacements = [];
   const flowerCount = Math.round(chunkDepth / 1.5);
   for (let i = 0; i < flowerCount; i++) {
     const x = rng.range(-1.5, 1.5);
@@ -286,11 +253,128 @@ export function generateChunk(worldSeed, coord, chunkDepth) {
     const count = rng.int(3, 8);
     const spread = rng.range(0.3, 0.6);
     const seed = rng.int(0, 1000);
-    const gy = groundY(x, z);
-    tris.push(...makeFlowerPatch(x, gy, z, count, spread, seed));
+    flowerPlacements.push({ x, z, count, spread, seed });
   }
 
-  // ── Grass clumps (triangle geometry, not the WASM-animated instances) ──
+  // Scenic beats — determine positions
+  const beatRNG = createRNG(hashCoord(worldSeed, coord + 99999));
+  const beatRoll = beatRNG.next();
+
+  if (coord === 0) {
+    const fpx = 4.5, fpz = zMax - 2.5;
+    scenicBeats.push({ type: 'fireplace', x: fpx, z: fpz });
+    features.push({ x: fpx, z: fpz, type: 'fireplace' });
+    const lpx = 1.0, lpz = zMin + chunkDepth * 0.45;
+    scenicBeats.push({ type: 'lamp', x: lpx, z: lpz });
+  } else if (beatRoll < 0.2) {
+    const fpx = beatRNG.range(-2, 3);
+    const fpz = beatRNG.range(zMin + 3, zMax - 3);
+    scenicBeats.push({ type: 'fireplace', x: fpx, z: fpz });
+    features.push({ x: fpx, z: fpz, type: 'fireplace' });
+  }
+  if (coord !== 0 && beatRoll >= 0.2 && beatRoll < 0.55) {
+    const lpx = beatRNG.range(-1.5, 2);
+    const lpz = beatRNG.range(zMin + 2, zMax - 2);
+    scenicBeats.push({ type: 'lamp', x: lpx, z: lpz });
+  }
+
+  // ── Phase 2: Set terrain context and generate all geometry ──
+  setContext(pathNodes, features);
+
+  // Valley walls
+  tris.push(...makeWallSection(-12, zMin, -12, zMax, -1, 0));
+  tris.push(...makeWallSection(12, zMin, 12, zMax, 1, 0));
+  for (const wb of wallBoulders) {
+    tris.push(...makeRock(wb.x, groundY(wb.x, wb.z), wb.z, wb.scale, wb.rot));
+  }
+
+  // Ground patches — zone-aware coloring with per-cell color sampling
+  for (let gz = zMin; gz < zMax; gz += 3) {
+    for (let gx = -12; gx < 12; gx += 3) {
+      const expo = sunExposure(gx, gz);
+      const isAlt = ((gx | 0) + (gz | 0)) % 2 === 0;
+      const baseC = isAlt
+        ? lerpColor(GROUND_GREEN_SHADE, GROUND_GREEN_LIT, expo)
+        : lerpColor(GROUND_MOSS_SHADE, GROUND_MOSS_LIT, expo);
+      // Sample color at patch center — groundColor applies zone tint + height shift
+      const c = groundColor(gx, gz, baseC);
+      tris.push(...makeGroundPatch(gx, gz, 3.2, 3.2, groundY, c));
+    }
+  }
+
+  // Path surface — follows terrain height (includes path carving)
+  // Slight +0.02 offset keeps path visually above ground z-fighting
+  const pathYFunc = (x, z) => groundY(x, z) + 0.02;
+  for (let i = 0; i < pathNodes.length - 1; i++) {
+    const a = pathNodes[i], b = pathNodes[i + 1];
+    const steps = 4;
+    for (let s = 0; s < steps; s++) {
+      const t = s / steps;
+      const px = a[0] + (b[0] - a[0]) * t;
+      const pz = a[2] + (b[2] - a[2]) * t;
+      const expo = sunExposure(px, pz);
+      const c = s % 2 === 0
+        ? lerpColor(PATH_COLOR_SHADE, PATH_COLOR_LIT, expo)
+        : lerpColor(DIRT_COLOR_SHADE, DIRT_COLOR_LIT, expo);
+      tris.push(...makeGroundPatch(px, pz, 1.6, 1.0, pathYFunc, c));
+    }
+  }
+
+  // Trees (using pre-planned positions, terrain-aware height)
+  const trees = [];
+  // Need a separate RNG for tree animation params (phase/speed/amp)
+  // since the main rng was consumed during planning
+  const treeAnimRNG = createRNG(hashCoord(worldSeed, coord + 77777));
+
+  for (const tp of treePlacements) {
+    const gy = groundY(tp.x, tp.z);
+    tris.push(...makeTreeShadow(tp.x, gy, tp.z, TREE_HEIGHTS[tp.type], TREE_CANOPY[tp.type], tp.scale));
+    const layered = TREE_LAYERED[tp.type](tp.x, gy, tp.z, tp.scale, tp.rot);
+    tris.push(...layered.trunk);
+    trees.push({
+      x: tp.x, z: tp.z, type: tp.type, scale: tp.scale,
+      canopyLayers: layered.canopyLayers,
+      phase: treeAnimRNG.range(0, 6.28),
+      speed: treeAnimRNG.range(0.4, 0.7),
+      amplitude: treeAnimRNG.range(0.012, 0.025),
+    });
+  }
+
+  // Bushes
+  for (const bp of bushPlacements) {
+    const gy = groundY(bp.x, bp.z);
+    tris.push(...makeBushShadow(bp.x, gy, bp.z, bp.scale));
+    tris.push(...makeBush(bp.x, gy, bp.z, bp.scale, bp.rot));
+  }
+
+  // Rocks
+  for (const rp of rockPlacements) {
+    const gy = groundY(rp.x, rp.z);
+    tris.push(...makeRockShadow(rp.x, gy, rp.z, rp.scale));
+    tris.push(...makeRock(rp.x, gy, rp.z, rp.scale, rp.rot));
+  }
+
+  // Stumps
+  for (const sp of stumpPlacements) {
+    const gy = groundY(sp.x, sp.z);
+    tris.push(...makeStumpShadow(sp.x, gy, sp.z, sp.scale));
+    tris.push(...makeStump(sp.x, gy, sp.z, sp.scale));
+  }
+
+  // Logs
+  for (const lp of logPlacements) {
+    const gy = groundY(lp.x, lp.z);
+    tris.push(...makeLogShadow(lp.x, gy, lp.z, lp.len, lp.scale, lp.rot));
+    tris.push(...makeLog(lp.x, gy, lp.z, lp.len, lp.scale, lp.rot));
+  }
+
+  // Flowers
+  for (const fp of flowerPlacements) {
+    const gy = groundY(fp.x, fp.z);
+    tris.push(...makeFlowerPatch(fp.x, gy, fp.z, fp.count, fp.spread, fp.seed));
+  }
+
+  // Grass clumps (static triangle geometry)
   for (let z = zMin; z < zMax; z += 1.2) {
     for (let x = -6; x < 6; x += 1.5) {
       const seed = x * 100 + z * 7;
@@ -303,7 +387,7 @@ export function generateChunk(worldSeed, coord, chunkDepth) {
     }
   }
 
-  // ── Grass instances (for WASM-animated blades) ──
+  // Grass instances (WASM-animated blades)
   const grassInstances = [];
   for (let z = zMin; z < zMax; z += 0.8) {
     for (let x = -6; x < 6; x += 0.9) {
@@ -318,34 +402,18 @@ export function generateChunk(worldSeed, coord, chunkDepth) {
     }
   }
 
-  // ── Scenic beats: fireplace every ~5 chunks, lamp every ~3 chunks ──
-  // Use a separate RNG seeded differently so beat placement is stable
-  const beatRNG = createRNG(hashCoord(worldSeed, coord + 99999));
-  const beatRoll = beatRNG.next();
-
-  if (coord === 0) {
-    // Chunk 0: place fireplace and lamp to match the original scene feel
-    const fpx = 4.5, fpz = zMax - 2.5;
-    tris.push(...makeFireplace(fpx, groundY(fpx, fpz), fpz));
-    scenicBeats.push({ type: 'fireplace', x: fpx, z: fpz });
-
-    const lpx = 1.0, lpz = zMin + chunkDepth * 0.45;
-    tris.push(...makeLampPost(lpx, groundY(lpx, lpz), lpz));
-    scenicBeats.push({ type: 'lamp', x: lpx, z: lpz });
-  } else if (beatRoll < 0.2) {
-    // ~20% chance of a fireplace
-    const fpx = beatRNG.range(-2, 3);
-    const fpz = beatRNG.range(zMin + 3, zMax - 3);
-    tris.push(...makeFireplace(fpx, groundY(fpx, fpz), fpz));
-    scenicBeats.push({ type: 'fireplace', x: fpx, z: fpz });
+  // Scenic beat geometry
+  for (const beat of scenicBeats) {
+    const gy = groundY(beat.x, beat.z);
+    if (beat.type === 'fireplace') {
+      tris.push(...makeFireplace(beat.x, gy, beat.z));
+    } else if (beat.type === 'lamp') {
+      tris.push(...makeLampPost(beat.x, gy, beat.z));
+    }
   }
-  if (coord !== 0 && beatRoll >= 0.2 && beatRoll < 0.55) {
-    // ~35% chance of a lamp post
-    const lpx = beatRNG.range(-1.5, 2);
-    const lpz = beatRNG.range(zMin + 2, zMax - 2);
-    tris.push(...makeLampPost(lpx, groundY(lpx, lpz), lpz));
-    scenicBeats.push({ type: 'lamp', x: lpx, z: lpz });
-  }
+
+  // ── Clean up terrain context ──
+  clearContext();
 
   return {
     coord,

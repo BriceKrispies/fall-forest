@@ -367,7 +367,7 @@ export function makeLog(x, y, z, length = 1.2, scale = 0.8, rot = 0) {
 
 export function makeGroundPatch(cx, cz, sizeX, sizeZ, yFunc, color) {
   const tris = [];
-  const res = 2;
+  const res = 3;
   const stepX = sizeX / res;
   const stepZ = sizeZ / res;
   const x0 = cx - sizeX/2;
@@ -377,7 +377,7 @@ export function makeGroundPatch(cx, cz, sizeX, sizeZ, yFunc, color) {
       const ax = x0 + i * stepX, az = z0 + j * stepZ;
       const bx = ax + stepX, bz = az + stepZ;
       const ay = yFunc(ax, az), by = yFunc(bx, az), cy = yFunc(bx, bz), dy = yFunc(ax, bz);
-      const c = [color[0] + (Math.sin(i*3+j*7)*0.02), color[1] + (Math.cos(i*5+j*3)*0.02), color[2]];
+      const c = [color[0] + (Math.sin(i*3+j*7)*0.015), color[1] + (Math.cos(i*5+j*3)*0.015), color[2]];
       tris.push(tri([ax, ay, az], [bx, cy, bz], [bx, by, az], c));
       tris.push(tri([ax, ay, az], [ax, dy, bz], [bx, cy, bz], c));
     }
