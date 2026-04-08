@@ -150,9 +150,10 @@ export class ChunkManager {
   /**
    * Generate breathing-displaced canopy triangles for all active trees.
    * Only includes trees within `radius` of the camera for performance.
+   * @param {number} growthY - additional Y offset (hell mode tree growth)
    * Returns a flat array of tris suitable for drawDynamicTris.
    */
-  getBreathingTris(time, camX, camZ, radius = 35) {
+  getBreathingTris(time, camX, camZ, radius = 35, growthY = 0) {
     const r2 = radius * radius;
     const out = [];
     for (const chunk of this.activeChunks.values()) {
@@ -162,10 +163,12 @@ export class ChunkManager {
 
         const breath = Math.sin(time * tree.speed + tree.phase);
         const amp = tree.amplitude;
+        // Per-tree growth varies slightly by phase for organic feel
+        const treeGrowth = growthY * (0.8 + 0.4 * Math.sin(tree.phase * 2.3));
 
         for (const layer of tree.canopyLayers) {
           const w = layer.weight;
-          const dy = breath * amp * w;
+          const dy = breath * amp * w + treeGrowth * w;
           const layerTris = layer.tris;
           for (let i = 0; i < layerTris.length; i++) {
             const [a, b, c, col] = layerTris[i];
@@ -177,6 +180,68 @@ export class ChunkManager {
             ]);
           }
         }
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Generate elongated trunk extensions for hell mode tree growth.
+   * Produces dark trunk columns growing from the top of existing trunks.
+   */
+  getGrowthTrunkTris(camX, camZ, growthY, radius = 35) {
+    if (growthY <= 0.01) return [];
+    const TREE_HEIGHTS = { A: 3.6, B: 4.4, C: 4.0 };
+    const TRUNK_W = { A: 0.12, B: 0.15, C: 0.10 };
+    const DARK_TRUNK = [0.18, 0.10, 0.05];
+    const DARKER_TRUNK = [0.12, 0.07, 0.03];
+    const r2 = radius * radius;
+    const out = [];
+
+    for (const chunk of this.activeChunks.values()) {
+      for (const tree of chunk.trees) {
+        const dx = tree.x - camX, dz = tree.z - camZ;
+        if (dx * dx + dz * dz > r2) continue;
+
+        const treeGrowth = growthY * (0.8 + 0.4 * Math.sin(tree.phase * 2.3));
+        if (treeGrowth < 0.05) continue;
+
+        const gy = groundYFast(tree.x, tree.z);
+        const baseH = TREE_HEIGHTS[tree.type] * tree.scale;
+        const w = TRUNK_W[tree.type] * tree.scale;
+        const topY = gy + baseH * 0.6; // roughly where trunk top is
+        const extH = treeGrowth;
+
+        // Slight wobble to make it look unnatural
+        const wobX = Math.sin(tree.phase * 3.1 + treeGrowth * 0.5) * 0.04 * treeGrowth;
+        const wobZ = Math.cos(tree.phase * 2.7 + treeGrowth * 0.3) * 0.04 * treeGrowth;
+
+        const tx = tree.x + wobX;
+        const tz = tree.z + wobZ;
+
+        // Narrow as it grows — tapers to 60%
+        const topW = w * 0.6;
+
+        // 4 faces of the trunk extension
+        const bfl = [tx - w, topY, tz - w];
+        const bfr = [tx + w, topY, tz - w];
+        const bbl = [tx - w, topY, tz + w];
+        const bbr = [tx + w, topY, tz + w];
+        const tfl = [tx - topW + wobX, topY + extH, tz - topW + wobZ];
+        const tfr = [tx + topW + wobX, topY + extH, tz - topW + wobZ];
+        const tbl = [tx - topW + wobX, topY + extH, tz + topW + wobZ];
+        const tbr = [tx + topW + wobX, topY + extH, tz + topW + wobZ];
+
+        // Front/back faces
+        out.push([bfl, tfr, bfr, DARK_TRUNK]);
+        out.push([bfl, tfl, tfr, DARK_TRUNK]);
+        out.push([bbl, bbr, tbr, DARKER_TRUNK]);
+        out.push([bbl, tbr, tbl, DARKER_TRUNK]);
+        // Side faces
+        out.push([bfl, bbl, tbl, DARK_TRUNK]);
+        out.push([bfl, tbl, tfl, DARK_TRUNK]);
+        out.push([bfr, tfr, tbr, DARKER_TRUNK]);
+        out.push([bfr, tbr, bbr, DARKER_TRUNK]);
       }
     }
     return out;
