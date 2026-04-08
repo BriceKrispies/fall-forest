@@ -32,17 +32,18 @@ const SLOPE_BASE = [0.28, 0.34, 0.18];
 const SLOPE_MID = [0.42, 0.36, 0.24];
 const SLOPE_UPPER = [0.48, 0.44, 0.38];
 const SLOPE_RIDGE = [0.38, 0.36, 0.33];
-const SLOPE_COLORS = [SLOPE_BASE, SLOPE_MID, SLOPE_UPPER, SLOPE_RIDGE];
+const SLOPE_TOP = [0.32, 0.30, 0.28];
+const SLOPE_COLORS = [SLOPE_BASE, SLOPE_MID, SLOPE_UPPER, SLOPE_RIDGE, SLOPE_TOP];
 
-function makeWallSection(x0, z0, x1, z1, outDirX, outDirZ) {
+function makeWallSection(x0, z0, x1, z1, outDirX, outDirZ, flipWinding = false) {
   const tris = [];
   const dx = x1 - x0, dz = z1 - z0;
   const wallLen = Math.sqrt(dx * dx + dz * dz);
   const segLen = 2;
   const segments = Math.max(1, Math.round(wallLen / segLen));
-  const strips = 3;
-  const slopeDepth = 4;
-  const ridgeHeight = 4;
+  const strips = 4;
+  const slopeDepth = 5;
+  const ridgeHeight = 10;
 
   const verts = [];
   for (let i = 0; i <= segments; i++) {
@@ -73,8 +74,13 @@ function makeWallSection(x0, z0, x1, z1, outDirX, outDirZ) {
       const variation = Math.sin(i * 3 + s * 7) * 0.02;
       const variation2 = Math.cos(i * 5 + s * 3) * 0.02;
       const col = [baseColor[0] + variation, baseColor[1] + variation2, baseColor[2]];
-      tris.push([a, c, b, col]);
-      tris.push([a, d, c, col]);
+      if (flipWinding) {
+        tris.push([a, b, c, col]);
+        tris.push([a, c, d, col]);
+      } else {
+        tris.push([a, c, b, col]);
+        tris.push([a, d, c, col]);
+      }
     }
   }
   return tris;
@@ -281,9 +287,9 @@ export function generateChunk(worldSeed, coord, chunkDepth) {
   // ── Phase 2: Set terrain context and generate all geometry ──
   setContext(pathNodes, features);
 
-  // Valley walls
-  tris.push(...makeWallSection(-12, zMin, -12, zMax, -1, 0));
-  tris.push(...makeWallSection(12, zMin, 12, zMax, 1, 0));
+  // Valley walls (left wall needs flipped winding so normals face inward)
+  tris.push(...makeWallSection(-12, zMin, -12, zMax, -1, 0, true));
+  tris.push(...makeWallSection(12, zMin, 12, zMax, 1, 0, false));
   for (const wb of wallBoulders) {
     tris.push(...makeRock(wb.x, groundY(wb.x, wb.z), wb.z, wb.scale, wb.rot));
   }
