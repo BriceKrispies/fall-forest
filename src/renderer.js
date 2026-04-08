@@ -52,7 +52,7 @@ export class Renderer {
     this.pixels.fill(0);
     this.depth.fill(1e9);
     const viewMat = mat4lookAt(camPos, camTarget, camUp);
-    const projMat = mat4perspective(fov, this.w / this.h, 0.3, 80);
+    const projMat = mat4perspective(fov, this.w / this.h, 0.3, 160);
     this.mvp = mat4multiply(projMat, viewMat);
 
     const fc = this.fogColor;

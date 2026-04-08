@@ -11,7 +11,7 @@ import { DEFAULT_WORLD_SEED } from './seed.js';
 import { uploadTriangles, uploadGrassInstances } from '../wasm-bridge.js';
 
 const CHUNK_DEPTH = 16;
-const ACTIVE_RADIUS = 4; // current chunk ± 4
+const ACTIVE_RADIUS = 8; // current chunk ± 8
 
 export class ChunkManager {
   constructor(worldSeed = DEFAULT_WORLD_SEED) {

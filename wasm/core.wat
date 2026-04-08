@@ -1,5 +1,5 @@
 (module
-  (memory (export "memory") 64)
+  (memory (export "memory") 96)
 
   (global $tri_count (mut i32) (i32.const 0))
   (global $visible_count (mut i32) (i32.const 0))
@@ -19,19 +19,19 @@
   (global $OFF_CONSTANTS i32 (i32.const 96))
   (global $OFF_METRICS i32 (i32.const 128))
   (global $OFF_TRI_IN i32 (i32.const 256))
-  (global $MAX_TRIS i32 (i32.const 28000))
-  (global $OFF_TRI_OUT i32 (i32.const 1344256))
-  (global $OFF_LEAVES i32 (i32.const 2688256))
+  (global $MAX_TRIS i32 (i32.const 56000))
+  (global $OFF_TRI_OUT i32 (i32.const 2688256))
+  (global $OFF_LEAVES i32 (i32.const 5376256))
   (global $MAX_LEAVES i32 (i32.const 64))
-  (global $OFF_GRASS i32 (i32.const 2690304))
+  (global $OFF_GRASS i32 (i32.const 5378304))
   (global $MAX_GRASS i32 (i32.const 2000))
-  (global $OFF_CREATURES i32 (i32.const 2754304))
+  (global $OFF_CREATURES i32 (i32.const 5442304))
   (global $MAX_CREATURES i32 (i32.const 16))
 
   ;; Horror entity system
-  (global $OFF_HORROR_CFG i32 (i32.const 2760000))    ;; 32 bytes config
-  (global $OFF_HORROR_ENT i32 (i32.const 2760032))    ;; 8 entities × 64 bytes = 512
-  (global $OFF_HORROR_SEG i32 (i32.const 2760544))    ;; 512 segments × 48 bytes = 24576
+  (global $OFF_HORROR_CFG i32 (i32.const 5448000))    ;; 32 bytes config
+  (global $OFF_HORROR_ENT i32 (i32.const 5448032))    ;; 8 entities × 64 bytes = 512
+  (global $OFF_HORROR_SEG i32 (i32.const 5448544))    ;; 512 segments × 48 bytes = 24576
   (global $MAX_HORROR_ENT i32 (i32.const 8))
   (global $MAX_HORROR_SEG i32 (i32.const 512))
   (global $HORROR_ENT_STRIDE i32 (i32.const 64))

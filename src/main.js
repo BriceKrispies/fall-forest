@@ -34,7 +34,7 @@ async function start() {
 
   wasm.set_screen(RENDER_W, RENDER_H);
   uploadSunDir(lighting.sunDir);
-  uploadConstants(10, 52, 0.32);
+  uploadConstants(20, 104, 0.32);
 
   // Initial chunk load at player start position
   chunkManager.update(camera.z);
@@ -262,7 +262,7 @@ async function start() {
     updateSunShadowDir(env.sunDir);
 
     // Dynamic ambient passed to WASM
-    uploadConstants(10, 52, 0.2 + env.ambientLevel * 0.15);
+    uploadConstants(20, 104, 0.2 + env.ambientLevel * 0.15);
 
     const mvp = renderer.beginFrame(eye, target, [0, 1, 0], FOV);
 
