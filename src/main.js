@@ -476,7 +476,38 @@ async function start() {
       let text =
         `fps: ${fpsDisplay}\n` +
         `pos: ${dbgEye[0].toFixed(1)}, ${dbgEye[1].toFixed(1)}, ${dbgEye[2].toFixed(1)}\n` +
-        `time: ${lighting.timeOfDay.toFixed(2)}`;
+        `pitch: ${camera.pitch.toFixed(3)} rad (${(camera.pitch * 180 / Math.PI).toFixed(1)}°)\n` +
+        `time: ${lighting.timeOfDay.toFixed(2)}\n` +
+        `visTris: ${visCount}\n` +
+        `mode: ${worldMode.current} nightness: ${env.nightness.toFixed(2)}`;
+
+      // Sample pixel colors at key screen positions (after all rendering)
+      const px = renderer.pixels;
+      const samplePx = (sx, sy) => {
+        const i = (sy * RENDER_W + sx) * 4;
+        return `${px[i]},${px[i+1]},${px[i+2]}`;
+      };
+      const midX = RENDER_W >> 1;
+      text += `\npx top: ${samplePx(midX, 5)}` +
+              `  mid: ${samplePx(midX, RENDER_H >> 1)}` +
+              `  bot: ${samplePx(midX, RENDER_H - 5)}`;
+
+      // Fog color being used
+      text += `\nfog: ${env.fogColor.map(c => (c * 255).toFixed(0)).join(',')}`;
+
+      // MVP matrix sanity — check for NaN/Inf
+      let mvpOk = true;
+      for (let i = 0; i < 16; i++) {
+        if (!isFinite(mvp[i])) { mvpOk = false; break; }
+      }
+      text += `\nmvp: ${mvpOk ? 'ok' : 'BROKEN'}`;
+
+      // View matrix right vector length (gimbal lock indicator)
+      const fwd = camera.getTarget();
+      const dirX = fwd[0] - dbgEye[0], dirY = fwd[1] - dbgEye[1], dirZ = fwd[2] - dbgEye[2];
+      const crossX = dirZ, crossZ = -dirX; // cross([0,1,0], dir) simplified
+      const rightLen = Math.sqrt(crossX * crossX + crossZ * crossZ);
+      text += `  rightVecLen: ${rightLen.toFixed(4)}`;
 
       if (chunkManager.debugEnabled) {
         const info = chunkManager.getDebugInfo();
