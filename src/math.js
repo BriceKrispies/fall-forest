@@ -32,7 +32,14 @@ export function mat4multiply(a, b) {
 
 export function mat4lookAt(eye, target, up) {
   const z = v3norm(v3sub(eye, target));
-  const x = v3norm(v3cross(up, z));
+  let x = v3cross(up, z);
+  // When looking nearly straight up/down, up and forward are parallel
+  // and the cross product collapses. Use an alternative up vector.
+  if (v3len(x) < 0.001) {
+    x = v3cross([0, 0, 1], z);
+    if (v3len(x) < 0.001) x = v3cross([1, 0, 0], z);
+  }
+  x = v3norm(x);
   const y = v3cross(z, x);
   return [
     x[0], x[1], x[2], -v3dot(x, eye),
