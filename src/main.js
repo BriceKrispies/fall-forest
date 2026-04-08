@@ -143,10 +143,6 @@ async function start() {
   const HORROR_WANDER_SPEED = 0.4;
   const HORROR_TURN_SPEED = 2.0;
 
-  // Hell tree growth state
-  let hellTreeGrowth = 0;            // current growth Y offset
-  const HELL_TREE_GROWTH_SPEED = 2.5; // units per second
-  const HELL_TREE_GROWTH_MAX = 18;   // grows past canopy view distance
 
   // Shared state for command handlers
   const gameState = {
@@ -303,25 +299,10 @@ async function start() {
     const visCount = wasm.process_triangles();
     renderer.rasterizeWasmOutput(visCount);
 
-    // Hell tree growth — ramp up when in hell mode, reset otherwise
-    if (worldMode.current === 'hell' && hellTreeGrowth < HELL_TREE_GROWTH_MAX) {
-      hellTreeGrowth = Math.min(HELL_TREE_GROWTH_MAX, hellTreeGrowth + HELL_TREE_GROWTH_SPEED * dt);
-    } else if (worldMode.current !== 'hell' && hellTreeGrowth > 0) {
-      hellTreeGrowth = 0;
-    }
-
-    // Tree breathing — canopy tris with subtle vertical displacement (+ hell growth)
-    const breathingTris = chunkManager.getBreathingTris(totalTime, eye[0], eye[2], 35, hellTreeGrowth);
+    // Tree breathing — canopy tris with subtle vertical displacement
+    const breathingTris = chunkManager.getBreathingTris(totalTime, eye[0], eye[2]);
     if (breathingTris.length > 0) {
       renderer.drawDynamicTris(breathingTris, false);
-    }
-
-    // Hell trunk extensions — dark columns growing unnaturally upward
-    if (hellTreeGrowth > 0.05) {
-      const growthTrunks = chunkManager.getGrowthTrunkTris(eye[0], eye[2], hellTreeGrowth);
-      if (growthTrunks.length > 0) {
-        renderer.drawDynamicTris(growthTrunks, false);
-      }
     }
 
     // Render fire flames and glow for all active fireplaces
