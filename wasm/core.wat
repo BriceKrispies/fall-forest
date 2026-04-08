@@ -239,6 +239,23 @@
           )
         )
 
+        ;; Near-distance cull — skip triangles whose 3D centroid is too close
+        ;; to the camera. Prevents ground tris at feet from covering the sky.
+        (local.set $dy (f32.sub
+          (f32.div (f32.add (f32.add (local.get $v0y) (local.get $v1y)) (local.get $v2y)) (f32.const 3))
+          (call $cam_y)))
+        (if (f32.lt (f32.add (f32.add
+              (f32.mul (local.get $cx) (local.get $cx))
+              (f32.mul (local.get $dy) (local.get $dy)))
+              (f32.mul (local.get $cz) (local.get $cz)))
+            (f32.const 0.25))  ;; 0.5 unit radius squared
+          (then
+            (local.set $in_off (i32.add (local.get $in_off) (i32.const 48)))
+            (local.set $i (i32.add (local.get $i) (i32.const 1)))
+            (br $loop)
+          )
+        )
+
         (local.set $e1x (f32.sub (local.get $v1x) (local.get $v0x)))
         (local.set $e1y (f32.sub (local.get $v1y) (local.get $v0y)))
         (local.set $e1z (f32.sub (local.get $v1z) (local.get $v0z)))
