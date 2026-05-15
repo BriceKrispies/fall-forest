@@ -13,7 +13,9 @@
 import { chunkBounds, chunkRNG, hashChunkCoord } from './chunk-coords.js';
 import { createRNG } from './seed.js';
 import { generatePathNodes } from './path-gen.js';
-import { groundY, setContext, clearContext, groundColor } from './terrain.js';
+import { groundY, groundYFast, setContext, clearContext, groundColor } from './terrain.js';
+import { planAnchors } from './scenic-anchors.js';
+import { buildSlotsForAnchor } from './discovery-slots.js';
 import {
   makeBush, makeFlowerPatch, makeGrassClump,
   makeRock, makeStump, makeLog, makeGroundPatch,
@@ -397,13 +399,27 @@ export function generateChunk(worldSeed, cx, cz, size) {
     ? generatePathNodes(worldSeed, cz, size)
     : [];
 
+  // Scenic anchors (deterministic from seed+coord) drive authored
+  // composition; their contributed props are merged into the chunk's
+  // base placement arrays before geometry is built.
+  const anchors = planAnchors(worldSeed, cx, cz, size, pathNodes);
   const plan = planChunk(worldSeed, cx, cz, size, pathNodes);
+  mergeAnchorProps(plan, anchors);
 
   // Hand path + features to the terrain layer so groundY() applies the
   // path carve and feature mounds while we build geometry.
   setContext(pathNodes, plan.features);
   const { tris, trees } = buildChunkTris(worldSeed, cx, cz, size, pathNodes, plan);
   clearContext();
+
+  // Discovery slots are derived from anchor data; they use groundYFast
+  // (macro + zone layers only) so the Y is consistent with runtime
+  // queries from the player's perspective.
+  const slots = [];
+  for (const anchor of anchors) {
+    const anchorSlots = buildSlotsForAnchor(worldSeed, cx, cz, anchor, groundYFast);
+    for (let i = 0; i < anchorSlots.length; i++) slots.push(anchorSlots[i]);
+  }
 
   // Grass instances don't need terrain context — they only use groundY's
   // macro+zone layers indirectly via groundY here (path/feature ctx is off).
@@ -417,6 +433,46 @@ export function generateChunk(worldSeed, cx, cz, size) {
     trees,
     grassInstances,
     scenicBeats: plan.scenicBeats,
+    anchors,
+    slots,
     triCount: tris.length,
   };
+}
+
+/**
+ * Merge anchor-contributed prop placements into the chunk's plan buckets.
+ * Anchor props are authored composition — they should appear in the
+ * geometry pass alongside the base density fill.
+ */
+function mergeAnchorProps(plan, anchors) {
+  for (const anchor of anchors) {
+    for (const p of anchor.props) {
+      switch (p.kind) {
+        case 'tree':
+          plan.treePlacements.push({ type: p.type, x: p.x, z: p.z, scale: p.scale, rot: p.rot });
+          plan.features.push({ x: p.x, z: p.z, type: 'tree' });
+          break;
+        case 'bush':
+          plan.bushPlacements.push({ x: p.x, z: p.z, scale: p.scale, rot: p.rot });
+          break;
+        case 'rock':
+          plan.rockPlacements.push({ x: p.x, z: p.z, scale: p.scale, rot: p.rot });
+          plan.features.push({ x: p.x, z: p.z, type: 'rock' });
+          break;
+        case 'stump':
+          plan.stumpPlacements.push({ x: p.x, z: p.z, scale: p.scale });
+          plan.features.push({ x: p.x, z: p.z, type: 'stump' });
+          break;
+        case 'log':
+          plan.logPlacements.push({ x: p.x, z: p.z, len: p.len, scale: p.scale, rot: p.rot });
+          plan.features.push({ x: p.x, z: p.z, type: 'log' });
+          break;
+        case 'flowers':
+          plan.flowerPlacements.push({
+            x: p.x, z: p.z, count: p.count, spread: p.spread, seed: p.seed,
+          });
+          break;
+      }
+    }
+  }
 }

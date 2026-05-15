@@ -10,12 +10,28 @@ import { CommandRegistry } from './commands.js';
 import { GameConsole } from './console.js';
 import { ChunkSystem } from './world/chunk-system.js';
 import { groundYFast } from './world/terrain.js';
+import { SLOT_TYPES } from './world/discovery-slots.js';
 import { generateAllHorrors } from './horror-gen.js';
 import { renderHorrors, renderHorrorDebug } from './horror-renderer.js';
 
 const RENDER_W = 320;
 const RENDER_H = 200;
 const FOV = 1.1;
+
+// Debug-only colors for slot markers. Picked to be legible against the
+// warm forest palette without matching any natural foliage color.
+const SLOT_DEBUG_COLOR = {
+  [SLOT_TYPES.GROUND]:           [220, 220, 200],
+  [SLOT_TYPES.TREE_BACK]:        [70, 200, 70],
+  [SLOT_TYPES.STUMP_TOP]:        [255, 160, 60],
+  [SLOT_TYPES.LOG_END]:          [200, 130, 60],
+  [SLOT_TYPES.FLOWER_CENTER]:    [255, 120, 200],
+  [SLOT_TYPES.CLEARING_CENTER]:  [120, 220, 255],
+  [SLOT_TYPES.ROCK_GAP]:         [180, 190, 210],
+  [SLOT_TYPES.PATH_EDGE]:        [255, 235, 80],
+  [SLOT_TYPES.BUSH_SHADOW]:      [200, 140, 220],
+};
+const SLOT_DEBUG_FALLBACK = [255, 255, 255];
 
 const canvas = document.getElementById('canvas');
 const hint = document.getElementById('hint');
@@ -472,6 +488,16 @@ async function start() {
     rain.draw(renderer.pixels, RENDER_W, RENDER_H, renderer.depth,
               mvp, renderer.hw, renderer.hh);
 
+    // Discovery-slot debug markers — gated behind chunk debug mode.
+    if (chunkSystem.debugEnabled) {
+      const slots = chunkSystem.getAllSlots();
+      for (let i = 0; i < slots.length; i++) {
+        const s = slots[i];
+        renderer.drawDebugMarker(s.x, s.y + 0.05, s.z,
+          SLOT_DEBUG_COLOR[s.type] || SLOT_DEBUG_FALLBACK);
+      }
+    }
+
     renderer.endFrame();
 
     // Debug overlay update
@@ -526,7 +552,16 @@ async function start() {
         text += `\nseed: 0x${info.seed}` +
                 `\nchunk: (${info.currentCx}, ${info.currentCz}) size=${info.chunkSize}` +
                 `\nactive: ${info.activeCount} chunks  tris: ${info.totalTris}` +
-                `\n${info.chunks.join('\n')}`;
+                `\nanchors: ${info.totalAnchors}  slots: ${info.totalSlots}`;
+
+        const nearby = chunkSystem.findNearestSlots(dbgEye[0], dbgEye[2], 3);
+        if (nearby.length > 0) {
+          text += `\nnearest:`;
+          for (const { slot, distance } of nearby) {
+            text += `\n  ${slot.type} @${distance.toFixed(1)}m`;
+          }
+        }
+        text += `\n${info.chunks.join('\n')}`;
       }
 
       if (horrorState.debugEnabled) {

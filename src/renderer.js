@@ -480,4 +480,30 @@ export class Renderer {
       this.pixels[idx + 2] = cb;
     }
   }
+
+  /**
+   * Dev-only marker — small unlit cross drawn at a 3D position. Depth-tested,
+   * but written at full color (no fog/ambient) so it stays legible against
+   * the scene. Intended for chunk/slot debug visualization only.
+   */
+  drawDebugMarker(x, y, z, rgb) {
+    const sp = projectPoint(this.mvp, [x, y, z], this.hw, this.hh);
+    if (!sp) return;
+    const sx = Math.round(sp[0]), sy = Math.round(sp[1]), sz = sp[2];
+    if (sx < 1 || sx >= this.w - 1 || sy < 1 || sy >= this.h - 1) return;
+    const r = rgb[0] | 0, g = rgb[1] | 0, b = rgb[2] | 0;
+    const writePx = (dx, dy) => {
+      const di = (sy + dy) * this.w + (sx + dx);
+      if (sz > this.depth[di]) return;
+      const idx = di * 4;
+      this.pixels[idx] = r;
+      this.pixels[idx + 1] = g;
+      this.pixels[idx + 2] = b;
+    };
+    writePx(0, 0);
+    writePx(1, 0);
+    writePx(-1, 0);
+    writePx(0, 1);
+    writePx(0, -1);
+  }
 }
