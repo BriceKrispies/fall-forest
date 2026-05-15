@@ -37,7 +37,6 @@ export class FreeCamera {
       const inv = spd * dt / len;
       this.x += mx * inv;
       this.z += mz * inv;
-      this.x = clamp(this.x, -11, 11);
     }
 
     this.swayTime += dt;
