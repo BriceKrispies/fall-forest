@@ -26,20 +26,25 @@ The project moves performance-critical hot loops into WebAssembly written direct
 
 ## Memory layout
 
-All data lives in a single shared WebAssembly.Memory (64 pages = 4MB).
+All data lives in a single shared WebAssembly.Memory (128 pages = 8MB).
 
-| Offset | Size | Contents |
-|--------|------|----------|
-| 0 | 64B | MVP matrix (16 x f32) |
-| 64 | 12B | Camera position (3 x f32) |
-| 80 | 12B | Sun direction (3 x f32) |
-| 96 | 12B | Constants: fog_near, fog_far, ambient (3 x f32) |
-| 128 | 20B | Metrics: tris_processed, tris_visible, leaves_active, grass_active, creatures_active (5 x i32) |
-| 256 | 768KB | Triangle input buffer (up to 16000 tris x 48B each) |
-| 768256 | 768KB | Triangle output buffer (projected visible tris x 48B each) |
-| 1728256 | 2KB | Leaf particle buffer (64 leaves x 32B each) |
-| 1730304 | 64KB | Grass instance buffer (2000 blades x 32B each) |
-| 1794304 | 512B | Creature buffer (16 creatures x 32B each) |
+| Offset  | Size  | Contents |
+|---------|-------|----------|
+| 0       | 64B   | MVP matrix (16 x f32) |
+| 64      | 12B   | Camera position (3 x f32) |
+| 80      | 12B   | Sun direction (3 x f32) |
+| 96      | 12B   | Constants: fog_near, fog_far, ambient (3 x f32) |
+| 128     | 20B   | Metrics: tris_processed, tris_visible, leaves_active, grass_active, creatures_active (5 x i32) |
+| 156     | 4B    | Point light count (i32) |
+| 160     | 128B  | Point lights buffer (8 x [x,y,z,radius]) |
+| 256     | 3.66MB| Triangle input buffer (up to 80000 tris x 48B each) |
+| 3840256 | 3.66MB| Triangle output buffer (projected visible tris x 48B each) |
+| 7680256 | 2KB   | Leaf particle buffer (64 leaves x 32B each) |
+| 7682304 | 64KB  | Grass instance buffer (2000 blades x 32B each) |
+| 7746304 | 512B  | Creature buffer (16 creatures x 32B each) |
+| 7752000 | 32B   | Horror simulation config |
+| 7752032 | 512B  | Horror entity buffer (8 entities x 64B each) |
+| 7752544 | 24KB  | Horror segment buffer (512 segments x 48B each) |
 
 ### Triangle input record (48 bytes)
 ```

@@ -50,7 +50,10 @@ async function start() {
 
   wasm.set_screen(RENDER_W, RENDER_H);
   uploadSunDir(lighting.sunDir);
-  uploadConstants(20, 104, 0.32);
+  // Tightened fog: ramp 15→56m so the d²=5 pop-in ring (~32m) is already in
+  // heavy fog and the d²=8 corners (~40m) are essentially fog-colored. This
+  // matches the storybook art direction's documented "~35m visibility".
+  uploadConstants(15, 56, 0.32);
 
   // Initial chunk load at player start position (3x3 around the player).
   chunkSystem.update(camera.x, camera.z);
@@ -214,11 +217,44 @@ async function start() {
     return `seed: 0x${state.chunkSystem.worldSeed.toString(16)}`;
   }, 'Show or set world seed');
 
-  // Register /chunks command
+  // Register /chunks command — toggles debug, or tunes the buffer windows.
+  //   /chunks            — toggle the chunk debug overlay
+  //   /chunks gen <n>    — set generation (buffered) radius (5x5 = 2)
+  //   /chunks render <n> — set render-submission radius
+  //   /chunks active <n> — set active/simulation radius (gameplay scope)
   commands.register('chunks', (args, state) => {
-    state.chunkSystem.debugEnabled = !state.chunkSystem.debugEnabled;
-    return `chunks debug: ${state.chunkSystem.debugEnabled ? 'on' : 'off'}`;
-  }, 'Toggle chunk debug info');
+    const parts = (args || '').trim().split(/\s+/).filter(Boolean);
+    if (parts.length === 0) {
+      state.chunkSystem.debugEnabled = !state.chunkSystem.debugEnabled;
+      return `chunks debug: ${state.chunkSystem.debugEnabled ? 'on' : 'off'}`;
+    }
+    if (parts.length >= 2) {
+      const key = parts[0].toLowerCase();
+      const val = parseInt(parts[1], 10);
+      if (isNaN(val) || val < 0 || val > 6) return 'usage: /chunks <gen|render|active> <0..6>';
+      if (key === 'gen' || key === 'generation') {
+        state.chunkSystem.setWindowSizes({ generationRadius: val });
+        return `generationRadius: ${state.chunkSystem.generationRadius}`;
+      }
+      if (key === 'render') {
+        state.chunkSystem.setWindowSizes({ renderRadius: val });
+        return `renderRadius: ${state.chunkSystem.renderRadius} (gen clamped to ${state.chunkSystem.generationRadius})`;
+      }
+      if (key === 'active' || key === 'sim') {
+        state.chunkSystem.setWindowSizes({ activeRadius: val });
+        return `activeRadius: ${state.chunkSystem.activeRadius}`;
+      }
+    }
+    return 'usage: /chunks | /chunks <gen|render|active> <0..6>';
+  }, 'Toggle chunk debug or tune buffered/render/active radii');
+
+  // Register /seams command — verify ground continuity across chunk boundaries
+  commands.register('seams', (args, state) => {
+    const r = state.chunkSystem.verifySeams();
+    if (r.ok) return `seams ok (${r.checked} samples, maxDiff=${r.maxDiff.toExponential(2)})`;
+    const first = r.mismatches[0];
+    return `seam mismatch! ${r.mismatches.length}/${r.checked} (e.g. ${first.boundary} x=${first.x} z=${first.z} ΔY=${first.diff})`;
+  }, 'Verify ground continuity across chunk seams');
 
   // Register /tp command — accepts "z" or "x z".
   commands.register('tp', (args, state) => {
@@ -289,7 +325,7 @@ async function start() {
     updateSunShadowDir(env.sunDir);
 
     // Dynamic ambient passed to WASM
-    uploadConstants(20, 104, 0.2 + env.ambientLevel * 0.15);
+    uploadConstants(15, 56, 0.2 + env.ambientLevel * 0.15);
 
     const mvp = renderer.beginFrame(eye, target, [0, 1, 0], FOV);
 
@@ -311,7 +347,9 @@ async function start() {
     uploadCamera(eye);
     wasm.set_time(totalTime);
 
-    // Upload point lights (fireplaces + lamps) for WASM triangle lighting
+    // Upload point lights (fireplaces + lamps) for WASM triangle lighting.
+    // With a wider visible window we may have more scenic beats than the 8-light
+    // WASM cap; sort by distance to camera so the nearest ones win.
     const fireplaces = chunkSystem.getFireplaces();
     const lamps = chunkSystem.getLamps();
     const pointLights = [];
@@ -321,6 +359,11 @@ async function start() {
     for (const lp of lamps) {
       pointLights.push([lp[0], groundYFast(lp[0], lp[2]) + 1.86, lp[2], 6.0]);
     }
+    pointLights.sort((a, b) => {
+      const da = (a[0] - eye[0]) ** 2 + (a[2] - eye[2]) ** 2;
+      const db = (b[0] - eye[0]) ** 2 + (b[2] - eye[2]) ** 2;
+      return da - db;
+    });
     uploadPointLights(pointLights);
 
     const visCount = wasm.process_triangles();
@@ -549,10 +592,20 @@ async function start() {
 
       if (chunkSystem.debugEnabled) {
         const info = chunkSystem.getDebugInfo();
+        const seams = chunkSystem.verifySeams();
+        const seamLine = seams.ok
+          ? `seams: ok (${seams.checked}, max ${seams.maxDiff.toExponential(1)})`
+          : `seams: ${seams.mismatches.length}/${seams.checked} FAIL maxΔ=${seams.maxDiff.toFixed(4)}`;
+        const budgetLine = info.droppedByBudget > 0
+          ? `tris: ${info.totalTris}/${info.triBudget} (cap dropped ${info.droppedByBudget} chunk${info.droppedByBudget === 1 ? '' : 's'})`
+          : `tris: ${info.totalTris}/${info.triBudget}`;
         text += `\nseed: 0x${info.seed}` +
                 `\nchunk: (${info.currentCx}, ${info.currentCz}) size=${info.chunkSize}` +
-                `\nactive: ${info.activeCount} chunks  tris: ${info.totalTris}` +
-                `\nanchors: ${info.totalAnchors}  slots: ${info.totalSlots}`;
+                `\nwindows: gen=${info.generationRadius} render=${info.renderRadius} active=${info.activeRadius}` +
+                `\nbuffered: ${info.bufferedCount}  visible: ${info.visibleCount}  active: ${info.activeCount}` +
+                `\n${budgetLine}` +
+                `\nanchors: ${info.totalAnchors}  slots: ${info.totalSlots}` +
+                `\n${seamLine}`;
 
         const nearby = chunkSystem.findNearestSlots(dbgEye[0], dbgEye[2], 3);
         if (nearby.length > 0) {

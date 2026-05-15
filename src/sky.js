@@ -186,6 +186,18 @@ export class DaySky {
     const cloudG = lerp(baseG, fogG, fogTint);
     const cloudB = lerp(baseB, fogB, fogTint);
 
+    // Bounds for the per-cloud measured pixels-per-radian. Outside this range
+    // the cloud center is in the perspective-singular zone (direction nearly
+    // perpendicular to the view axis) and the measurement explodes — without
+    // a clamp, individual puffs at slightly off-axis angles would inherit a
+    // pixPerRad of thousands, render at sub-pixel `dx/rx` values across the
+    // whole screen, and pass the `d2 <= 1` test for every pixel. The result
+    // is a sudden screen-wide cloud-color blend when pitching up enough that
+    // a cloud behind the player crosses the view-perpendicular plane.
+    const PIX_PER_RAD_FALLBACK = hw * 1.8;
+    const PIX_PER_RAD_MIN = hw * 1.0;
+    const PIX_PER_RAD_MAX = hw * 3.0;
+
     for (const cloud of this.clouds) {
       const bob = Math.sin(cloud.bobPhase + this.time * CLOUD_BOB_SPEED * Math.PI * 2) * cloud.bobAmp;
       const cloudEl = cloud.elevation + bob;
@@ -198,7 +210,17 @@ export class DaySky {
       const centerWorld = v3add(camPos, v3scale(centerDir, SKY_SPHERE_R));
       const centerScreen = projectPoint(mvp, centerWorld, hw, hh);
 
-      let pixPerRad = hw * 1.8; // fallback: approximate scale for FOV ~1.1
+      // If the cloud center is in the singular zone (its projected position
+      // is far outside the screen) treat the cloud as off-view and skip it.
+      // Any puff that happens to project on-screen would otherwise inherit
+      // an unbounded pixPerRad from a center that should be invisible.
+      if (centerScreen) {
+        const offX = Math.abs(centerScreen[0] - hw);
+        const offY = Math.abs(centerScreen[1] - hh);
+        if (offX > hw * 4 || offY > hh * 4) continue;
+      }
+
+      let pixPerRad = PIX_PER_RAD_FALLBACK;
       if (centerScreen) {
         const refDir = skyDir(cloud.azimuth + 0.01, cloudEl);
         const refWorld = v3add(camPos, v3scale(refDir, SKY_SPHERE_R));
@@ -208,7 +230,9 @@ export class DaySky {
             (refScreen[0] - centerScreen[0]) ** 2 +
             (refScreen[1] - centerScreen[1]) ** 2
           ) / 0.01;
-          if (measured > 1) pixPerRad = measured;
+          if (measured > PIX_PER_RAD_MIN && measured < PIX_PER_RAD_MAX) {
+            pixPerRad = measured;
+          }
         }
       }
 

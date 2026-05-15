@@ -380,6 +380,45 @@ function buildGrassInstances(cx, cz, size) {
   return out;
 }
 
+// ── Seam-continuity helpers ──
+//
+// Path and feature deformations are local (≤2.5m radius), but their *samples*
+// straddle chunk boundaries: at z = zMax of (cx, cz) we share vertices with
+// (cx, cz+1). If each chunk only knew about its own path/features, the same
+// world-space point would compute different heights from each side and the
+// ground meshes would tear. The fix is to build groundY's context from the
+// 3x3 neighborhood, so every boundary sample sees the full set of nearby
+// path nodes and feature mounds — regardless of which chunk is being built.
+
+function planForContext(worldSeed, cx, cz, size) {
+  const pathNodes = cx === PATH_COLUMN_CX
+    ? generatePathNodes(worldSeed, cz, size)
+    : [];
+  const anchors = planAnchors(worldSeed, cx, cz, size, pathNodes);
+  const plan = planChunk(worldSeed, cx, cz, size, pathNodes);
+  mergeAnchorProps(plan, anchors);
+  return { pathNodes, features: plan.features };
+}
+
+/**
+ * Build the terrain context (path nodes + features) for chunk (cx, cz) by
+ * planning the whole 3x3 neighborhood and concatenating. Pure: same inputs
+ * always yield the same context, so heights at shared boundaries are
+ * identical from either side by construction.
+ */
+export function buildNeighborhoodContext(worldSeed, cx, cz, size) {
+  const allPath = [];
+  const allFeat = [];
+  for (let dz = -1; dz <= 1; dz++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const part = planForContext(worldSeed, cx + dx, cz + dz, size);
+      for (let i = 0; i < part.pathNodes.length; i++) allPath.push(part.pathNodes[i]);
+      for (let i = 0; i < part.features.length; i++) allFeat.push(part.features[i]);
+    }
+  }
+  return { pathNodes: allPath, features: allFeat };
+}
+
 // ── Public entry ──
 
 /**
@@ -406,9 +445,12 @@ export function generateChunk(worldSeed, cx, cz, size) {
   const plan = planChunk(worldSeed, cx, cz, size, pathNodes);
   mergeAnchorProps(plan, anchors);
 
-  // Hand path + features to the terrain layer so groundY() applies the
-  // path carve and feature mounds while we build geometry.
-  setContext(pathNodes, plan.features);
+  // Hand the 3x3 neighborhood's path + features to the terrain layer so
+  // groundY() agrees at every shared chunk boundary. Without the neighbor
+  // chunks here, a tree mound at z=zMax-0.5 would deform our edge but not
+  // the neighbor's edge → visible seam.
+  const ctx = buildNeighborhoodContext(worldSeed, cx, cz, size);
+  setContext(ctx.pathNodes, ctx.features);
   const { tris, trees } = buildChunkTris(worldSeed, cx, cz, size, pathNodes, plan);
   clearContext();
 

@@ -5,15 +5,15 @@ export const LAYOUT = {
   OFF_CONSTANTS: 96,
   OFF_METRICS: 128,
   OFF_TRI_IN: 256,
-  OFF_TRI_OUT: 2688256,
-  OFF_LEAVES: 5376256,
-  OFF_GRASS: 5378304,
-  OFF_CREATURES: 5442304,
+  OFF_TRI_OUT: 3840256,       // 256 + MAX_TRIS*48
+  OFF_LEAVES: 7680256,        // OFF_TRI_OUT + MAX_TRIS*48
+  OFF_GRASS: 7682304,         // OFF_LEAVES + MAX_LEAVES*32
+  OFF_CREATURES: 7746304,     // OFF_GRASS + MAX_GRASS*32
   TRI_STRIDE: 48,
   LEAF_STRIDE: 32,
   GRASS_STRIDE: 32,
   CREATURE_STRIDE: 32,
-  MAX_TRIS: 56000,
+  MAX_TRIS: 80000,
   MAX_LEAVES: 64,
   MAX_GRASS: 2000,
   MAX_CREATURES: 16,
@@ -21,9 +21,9 @@ export const LAYOUT = {
   OFF_LIGHTS: 160,
   MAX_LIGHTS: 8,
   // Horror entity system
-  OFF_HORROR_CFG: 5448000,
-  OFF_HORROR_ENT: 5448032,
-  OFF_HORROR_SEG: 5448544,
+  OFF_HORROR_CFG: 7752000,
+  OFF_HORROR_ENT: 7752032,
+  OFF_HORROR_SEG: 7752544,
   MAX_HORROR_ENT: 8,
   MAX_HORROR_SEG: 512,
   HORROR_ENT_STRIDE: 64,  // 16 f32
@@ -36,9 +36,14 @@ let f32View = null;
 let i32View = null;
 let u8View = null;
 
-export async function initWasm() {
-  const resp = await fetch('wasm/core.wasm');
-  const bytes = await resp.arrayBuffer();
+export async function initWasm(wasmBytes = null) {
+  let bytes;
+  if (wasmBytes) {
+    bytes = wasmBytes;
+  } else {
+    const resp = await fetch('wasm/core.wasm');
+    bytes = await resp.arrayBuffer();
+  }
   const result = await WebAssembly.instantiate(bytes);
   wasm = result.instance.exports;
   mem = wasm.memory;

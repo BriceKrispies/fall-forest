@@ -1,5 +1,5 @@
 (module
-  (memory (export "memory") 96)
+  (memory (export "memory") 128)
 
   (global $tri_count (mut i32) (i32.const 0))
   (global $visible_count (mut i32) (i32.const 0))
@@ -19,19 +19,19 @@
   (global $OFF_CONSTANTS i32 (i32.const 96))
   (global $OFF_METRICS i32 (i32.const 128))
   (global $OFF_TRI_IN i32 (i32.const 256))
-  (global $MAX_TRIS i32 (i32.const 56000))
-  (global $OFF_TRI_OUT i32 (i32.const 2688256))
-  (global $OFF_LEAVES i32 (i32.const 5376256))
+  (global $MAX_TRIS i32 (i32.const 80000))
+  (global $OFF_TRI_OUT i32 (i32.const 3840256))       ;; 256 + 80000*48
+  (global $OFF_LEAVES i32 (i32.const 7680256))        ;; OFF_TRI_OUT + 80000*48
   (global $MAX_LEAVES i32 (i32.const 64))
-  (global $OFF_GRASS i32 (i32.const 5378304))
+  (global $OFF_GRASS i32 (i32.const 7682304))         ;; OFF_LEAVES + 64*32
   (global $MAX_GRASS i32 (i32.const 2000))
-  (global $OFF_CREATURES i32 (i32.const 5442304))
+  (global $OFF_CREATURES i32 (i32.const 7746304))     ;; OFF_GRASS + 2000*32
   (global $MAX_CREATURES i32 (i32.const 16))
 
   ;; Horror entity system
-  (global $OFF_HORROR_CFG i32 (i32.const 5448000))    ;; 32 bytes config
-  (global $OFF_HORROR_ENT i32 (i32.const 5448032))    ;; 8 entities × 64 bytes = 512
-  (global $OFF_HORROR_SEG i32 (i32.const 5448544))    ;; 512 segments × 48 bytes = 24576
+  (global $OFF_HORROR_CFG i32 (i32.const 7752000))    ;; 32 bytes config
+  (global $OFF_HORROR_ENT i32 (i32.const 7752032))    ;; 8 entities × 64 bytes = 512
+  (global $OFF_HORROR_SEG i32 (i32.const 7752544))    ;; 512 segments × 48 bytes = 24576
   (global $MAX_HORROR_ENT i32 (i32.const 8))
   (global $MAX_HORROR_SEG i32 (i32.const 512))
   (global $HORROR_ENT_STRIDE i32 (i32.const 64))
@@ -124,7 +124,7 @@
     (local $x f32) (local $y f32) (local $z f32) (local $w f32) (local $inv f32)
     (call $transform_point (local.get $px) (local.get $py) (local.get $pz))
     (local.set $w) (local.set $z) (local.set $y) (local.set $x)
-    (if (f32.le (local.get $w) (f32.const 0.001))
+    (if (f32.le (local.get $w) (f32.const 0.15))
       (then (return (f32.const 0) (f32.const 0) (f32.const 0) (i32.const 0)))
     )
     (local.set $inv (f32.div (f32.const 1) (local.get $w)))
@@ -194,7 +194,7 @@
     (local $centx f32) (local $centy f32) (local $centz f32)
     (local $rawndl f32) (local $ndl f32) (local $ramp f32) (local $wrap f32) (local $light f32)
     (local $warmT f32) (local $tintR f32) (local $tintG f32) (local $tintB f32)
-    (local $dx f32) (local $dy f32) (local $dz f32) (local $dist f32) (local $fog f32)
+    (local $dx f32) (local $dy f32) (local $dz f32) (local $dist f32) (local $fog f32) (local $elfog f32)
     (local $sr f32) (local $sg f32) (local $sb f32)
     (local $amb f32)
     (local $li i32) (local $light_off i32) (local $light_count i32)
@@ -417,6 +417,20 @@
           (f32.mul (local.get $dy) (local.get $dy)))
           (f32.mul (local.get $dz) (local.get $dz)))))
         (local.set $fog (call $smoothstep (call $fog_near) (call $fog_far) (local.get $dist)))
+
+        ;; Elevation fog — fade geometry above camera at distance to prevent
+        ;; hard edges against sky. elevation_t = dy/dist (sin of elevation angle).
+        ;; Starts gently at low elevation, ramps with distance.
+        (if (f32.gt (local.get $dist) (f32.const 0.5))
+          (then
+            (local.set $elfog (f32.mul
+              (call $smoothstep (f32.const 0.02) (f32.const 0.15)
+                (f32.div (local.get $dy) (local.get $dist)))
+              (call $smoothstep (f32.const 8) (f32.const 18) (local.get $dist))))
+            (if (f32.gt (local.get $elfog) (local.get $fog))
+              (then (local.set $fog (local.get $elfog))))
+          )
+        )
 
         (local.set $sr (call $clamp (call $lerp (local.get $sr) (f32.const 0.82) (local.get $fog)) (f32.const 0) (f32.const 1)))
         (local.set $sg (call $clamp (call $lerp (local.get $sg) (f32.const 0.78) (local.get $fog)) (f32.const 0) (f32.const 1)))
