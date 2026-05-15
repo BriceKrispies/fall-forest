@@ -58,9 +58,9 @@ Features accumulate — a cluster of trees creates a more pronounced mound.
 |------|------|
 | `src/world/terrain.js` | Core terrain module — all layers, zones, colors |
 | `src/world/path-gen.js` | Re-exports `groundY` and `groundYFast` from terrain |
-| `src/world/chunk-gen.js` | Two-phase generation: plan features, then set context and build geometry |
+| `src/world/chunk-generator.js` | Two-phase generation: plan features, then set context and build geometry |
 | `src/camera.js` | Uses `groundYFast` for player height |
-| `src/world/chunk-manager.js` | Uses `groundYFast` for runtime queries |
+| `src/world/chunk-system.js` | Uses `groundYFast` for runtime queries |
 
 ### Two height functions
 
@@ -131,7 +131,7 @@ In `pathInfluence`, four constants control path integration:
 | `CARVE_DEPTH` | −0.14 | How deep the path sits below terrain |
 | `SHOULDER_HEIGHT` | +0.18 | How high the banks rise above path |
 
-The path surface in `chunk-gen.js` uses `groundY` (not a flat constant) so it follows the carved terrain profile. The +0.02 offset keeps the path surface above the ground mesh to prevent z-fighting.
+The path surface in `chunk-generator.js` uses `groundY` (not a flat constant) so it follows the carved terrain profile. The +0.02 offset keeps the path surface above the ground mesh to prevent z-fighting.
 
 ### Terrain zones
 
@@ -154,7 +154,7 @@ bridge: {
 },
 ```
 
-2. When placing the feature in `chunk-gen.js`, push `{ x, z, type: 'bridge' }` to the features array.
+2. When placing the feature in `chunk-generator.js`, push `{ x, z, type: 'bridge' }` to the features array.
 
 ### New terrain zone
 

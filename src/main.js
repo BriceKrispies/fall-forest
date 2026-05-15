@@ -8,7 +8,7 @@ import { WorldMode } from './world-mode.js';
 import { Rain } from './rain.js';
 import { CommandRegistry } from './commands.js';
 import { GameConsole } from './console.js';
-import { ChunkManager } from './world/chunk-manager.js';
+import { ChunkSystem } from './world/chunk-system.js';
 import { groundYFast } from './world/terrain.js';
 import { generateAllHorrors } from './horror-gen.js';
 import { renderHorrors, renderHorrorDebug } from './horror-renderer.js';
@@ -30,14 +30,14 @@ async function start() {
   const daySky = new DaySky();
   const sky = new NightSky();
   const rain = new Rain();
-  const chunkManager = new ChunkManager();
+  const chunkSystem = new ChunkSystem();
 
   wasm.set_screen(RENDER_W, RENDER_H);
   uploadSunDir(lighting.sunDir);
   uploadConstants(20, 104, 0.32);
 
-  // Initial chunk load at player start position
-  chunkManager.update(camera.z);
+  // Initial chunk load at player start position (3x3 around the player).
+  chunkSystem.update(camera.x, camera.z);
 
   const input = { forward: false, backward: false, left: false, right: false, sprint: false, dx: 0, dy: 0 };
   let locked = false;
@@ -150,7 +150,7 @@ async function start() {
     lighting,
     renderer,
     worldMode,
-    chunkManager,
+    chunkSystem,
     horrorState,
     debug: false,
     debugOverlay: null,
@@ -189,30 +189,33 @@ async function start() {
   // Register /seed command
   commands.register('seed', (args, state) => {
     if (!args) {
-      return `seed: 0x${state.chunkManager.worldSeed.toString(16)}`;
+      return `seed: 0x${state.chunkSystem.worldSeed.toString(16)}`;
     }
     const val = parseInt(args, args.startsWith('0x') ? 16 : 10);
     if (isNaN(val)) return 'invalid seed';
-    state.chunkManager.reset(val >>> 0);
-    state.chunkManager.update(state.camera.z);
-    return `seed: 0x${state.chunkManager.worldSeed.toString(16)}`;
+    state.chunkSystem.reset(val >>> 0);
+    state.chunkSystem.update(state.camera.x, state.camera.z);
+    return `seed: 0x${state.chunkSystem.worldSeed.toString(16)}`;
   }, 'Show or set world seed');
 
   // Register /chunks command
   commands.register('chunks', (args, state) => {
-    state.chunkManager.debugEnabled = !state.chunkManager.debugEnabled;
-    return `chunks debug: ${state.chunkManager.debugEnabled ? 'on' : 'off'}`;
+    state.chunkSystem.debugEnabled = !state.chunkSystem.debugEnabled;
+    return `chunks debug: ${state.chunkSystem.debugEnabled ? 'on' : 'off'}`;
   }, 'Toggle chunk debug info');
 
-  // Register /tp command
+  // Register /tp command — accepts "z" or "x z".
   commands.register('tp', (args, state) => {
-    const z = parseFloat(args);
-    if (isNaN(z)) return 'usage: /tp <z>';
-    state.camera.x = 0;
+    const parts = (args || '').trim().split(/\s+/).filter(Boolean).map(parseFloat);
+    if (parts.length === 0 || parts.some(isNaN)) return 'usage: /tp <z> | /tp <x> <z>';
+    let x, z;
+    if (parts.length === 1) { x = 0; z = parts[0]; }
+    else { x = parts[0]; z = parts[1]; }
+    state.camera.x = x;
     state.camera.z = z;
-    state.chunkManager.update(z);
-    return `teleported to z=${z.toFixed(1)}`;
-  }, 'Teleport to Z coordinate');
+    state.chunkSystem.update(x, z);
+    return `teleported to ${x.toFixed(1)}, ${z.toFixed(1)}`;
+  }, 'Teleport to (x, z)');
 
   // Register /horror command
   commands.register('horror', (args, state) => {
@@ -257,8 +260,8 @@ async function start() {
     const eye = camera.getEye();
     const target = camera.getTarget();
 
-    // Stream chunks around player
-    chunkManager.update(eye[2]);
+    // Stream chunks around player (3x3 window centered on the player's chunk)
+    chunkSystem.update(eye[0], eye[2]);
 
     // Update day/night cycle (time scale controlled by active world mode)
     lighting.update(simDt * worldMode.timeScale);
@@ -293,8 +296,8 @@ async function start() {
     wasm.set_time(totalTime);
 
     // Upload point lights (fireplaces + lamps) for WASM triangle lighting
-    const fireplaces = chunkManager.getFireplaces();
-    const lamps = chunkManager.getLamps();
+    const fireplaces = chunkSystem.getFireplaces();
+    const lamps = chunkSystem.getLamps();
     const pointLights = [];
     for (const fp of fireplaces) {
       pointLights.push([fp[0], groundYFast(fp[0], fp[2]) + 0.3, fp[2], 8.0]);
@@ -308,7 +311,7 @@ async function start() {
     renderer.rasterizeWasmOutput(visCount);
 
     // Tree breathing — canopy tris with subtle vertical displacement
-    const breathingTris = chunkManager.getBreathingTris(totalTime, eye[0], eye[2]);
+    const breathingTris = chunkSystem.getBreathingTris(totalTime, eye[0], eye[2]);
     if (breathingTris.length > 0) {
       renderer.drawDynamicTris(breathingTris, false);
     }
@@ -319,7 +322,7 @@ async function start() {
       const flames = makeFireFlames(fp[0], fpGy, fp[2], totalTime);
       renderer.drawDynamicTris(flames, true);
 
-      const casters = chunkManager.getFireShadowCasters([fp[0], fpGy, fp[2]]);
+      const casters = chunkSystem.getFireShadowCasters([fp[0], fpGy, fp[2]]);
       const fireShadows = computeFireShadows(
         [fp[0], fpGy, fp[2]],
         casters,
@@ -364,7 +367,7 @@ async function start() {
       if (!horrorState.generated || horrorState.lastMode !== modeKey) {
         // Generate horror spawn positions around camera
         const spawnCount = Math.max(1, Math.floor((env.horrorDensity || 0.5) * LAYOUT.MAX_HORROR_ENT));
-        const spawnSeed = (chunkManager.worldSeed ^ (modeKey.charCodeAt(0) * 31337)) >>> 0;
+        const spawnSeed = (chunkSystem.worldSeed ^ (modeKey.charCodeAt(0) * 31337)) >>> 0;
         const positions = [];
         for (let i = 0; i < spawnCount; i++) {
           const hash = (spawnSeed + i * 2654435761) >>> 0;
@@ -472,7 +475,7 @@ async function start() {
     renderer.endFrame();
 
     // Debug overlay update
-    if (gameState.debug || chunkManager.debugEnabled) {
+    if (gameState.debug || chunkSystem.debugEnabled) {
       frameCount++;
       fpsAccum += dt;
       if (fpsAccum >= 1) {
@@ -518,11 +521,11 @@ async function start() {
       const rightLen = Math.sqrt(crossX * crossX + crossZ * crossZ);
       text += `  rightVecLen: ${rightLen.toFixed(4)}`;
 
-      if (chunkManager.debugEnabled) {
-        const info = chunkManager.getDebugInfo();
+      if (chunkSystem.debugEnabled) {
+        const info = chunkSystem.getDebugInfo();
         text += `\nseed: 0x${info.seed}` +
-                `\nchunk: ${info.currentCoord}` +
-                `\ntris: ${info.totalTris}` +
+                `\nchunk: (${info.currentCx}, ${info.currentCz}) size=${info.chunkSize}` +
+                `\nactive: ${info.activeCount} chunks  tris: ${info.totalTris}` +
                 `\n${info.chunks.join('\n')}`;
       }
 
@@ -534,7 +537,7 @@ async function start() {
 
       debugOverlay.textContent = text;
       debugOverlay.style.display = 'block';
-    } else if (!gameState.debug && !chunkManager.debugEnabled) {
+    } else if (!gameState.debug && !chunkSystem.debugEnabled) {
       debugOverlay.style.display = 'none';
     }
 
