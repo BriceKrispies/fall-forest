@@ -34,6 +34,8 @@ export class ChunkSystem {
 
     this.activeBeats = [];      // merged scenicBeats from active chunks
     this.activePathNodes = [];  // merged pathNodes (cx=0 column only)
+    this.activeAnchors = [];    // flat anchor list across active chunks
+    this.activeSlots = [];      // flat slot list across active chunks
   }
 
   /** Coord of the chunk containing this world position. */
@@ -83,6 +85,8 @@ export class ChunkSystem {
     this.currentCz = null;
     this.activeBeats = [];
     this.activePathNodes = [];
+    this.activeAnchors = [];
+    this.activeSlots = [];
     this.totalTriCount = 0;
   }
 
@@ -95,20 +99,24 @@ export class ChunkSystem {
     const allGrass = [];
     const allBeats = [];
     const allPathNodes = [];
+    const allAnchors = [];
+    const allSlots = [];
 
     for (const chunk of chunks) {
       for (let i = 0; i < chunk.tris.length; i++) allTris.push(chunk.tris[i]);
       for (let i = 0; i < chunk.grassInstances.length; i++) allGrass.push(chunk.grassInstances[i]);
-      for (let i = 0; i < chunk.scenicBeats.length; i++) {
-        allBeats.push(chunk.scenicBeats[i]);
-      }
+      for (let i = 0; i < chunk.scenicBeats.length; i++) allBeats.push(chunk.scenicBeats[i]);
       for (let i = 0; i < chunk.pathNodes.length; i++) allPathNodes.push(chunk.pathNodes[i]);
+      for (let i = 0; i < chunk.anchors.length; i++) allAnchors.push(chunk.anchors[i]);
+      for (let i = 0; i < chunk.slots.length; i++) allSlots.push(chunk.slots[i]);
     }
 
     this.totalTriCount = uploadTriangles(allTris);
     uploadGrassInstances(allGrass);
     this.activeBeats = allBeats;
     this.activePathNodes = allPathNodes;
+    this.activeAnchors = allAnchors;
+    this.activeSlots = allSlots;
   }
 
   // ── Lookups consumed by main.js per frame ──
@@ -177,11 +185,58 @@ export class ChunkSystem {
     return out;
   }
 
+  // ── Anchor / slot queries ──
+
+  /** Flat array of all anchors across the active 3x3 set. */
+  getAllAnchors() {
+    return this.activeAnchors;
+  }
+
+  /** Flat array of all discovery slots across the active 3x3 set. */
+  getAllSlots() {
+    return this.activeSlots;
+  }
+
+  /**
+   * Find the single slot closest to (x, z) in the active set.
+   * 2D distance (ground plane); slot Y is informational.
+   *
+   * @returns {{slot, distance}|null}
+   */
+  findNearestSlot(x, z) {
+    let bestSlot = null;
+    let bestD2 = Infinity;
+    const slots = this.activeSlots;
+    for (let i = 0; i < slots.length; i++) {
+      const s = slots[i];
+      const dx = s.x - x, dz = s.z - z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 < bestD2) {
+        bestD2 = d2;
+        bestSlot = s;
+      }
+    }
+    return bestSlot ? { slot: bestSlot, distance: Math.sqrt(bestD2) } : null;
+  }
+
+  /** Top-N nearest slots by 2D distance. */
+  findNearestSlots(x, z, n = 3) {
+    const slots = this.activeSlots;
+    const ranked = new Array(slots.length);
+    for (let i = 0; i < slots.length; i++) {
+      const s = slots[i];
+      const dx = s.x - x, dz = s.z - z;
+      ranked[i] = { slot: s, distance: Math.sqrt(dx * dx + dz * dz) };
+    }
+    ranked.sort((a, b) => a.distance - b.distance);
+    return ranked.slice(0, n);
+  }
+
   /** Compact debug record — fed to the debug overlay. */
   getDebugInfo() {
-    const coords = Array.from(this.active.values())
+    const chunks = Array.from(this.active.values())
       .sort((a, b) => (a.cz - b.cz) || (a.cx - b.cx))
-      .map(c => `[${c.cx},${c.cz}] tris:${c.triCount}`);
+      .map(c => `[${c.cx},${c.cz}] tris:${c.triCount} a:${c.anchors.length} s:${c.slots.length}`);
     return {
       seed: this.worldSeed.toString(16),
       currentCx: this.currentCx,
@@ -189,7 +244,9 @@ export class ChunkSystem {
       chunkSize: this.chunkSize,
       activeCount: this.active.size,
       totalTris: this.totalTriCount,
-      chunks: coords,
+      totalAnchors: this.activeAnchors.length,
+      totalSlots: this.activeSlots.length,
+      chunks,
     };
   }
 }
