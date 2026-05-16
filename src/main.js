@@ -50,10 +50,10 @@ async function start() {
 
   wasm.set_screen(RENDER_W, RENDER_H);
   uploadSunDir(lighting.sunDir);
-  // Tightened fog: ramp 15→56m so the d²=5 pop-in ring (~32m) is already in
-  // heavy fog and the d²=8 corners (~40m) are essentially fog-colored. This
-  // matches the storybook art direction's documented "~35m visibility".
-  uploadConstants(15, 56, 0.32);
+  // Fog ramp 30→112m — doubled from the original 15→56m to match the doubled
+  // render radius. The d²=16 ring (64m chunk-center) sits mid-ramp so the
+  // outermost rendered chunks fade rather than pop.
+  uploadConstants(30, 112, 0.32);
 
   // Initial chunk load at player start position (3x3 around the player).
   chunkSystem.update(camera.x, camera.z);
