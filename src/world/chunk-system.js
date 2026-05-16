@@ -42,6 +42,12 @@ import { uploadTriangles, uploadGrassInstances, LAYOUT } from '../wasm-bridge.js
 // Ground-patch tiling step (must match chunk-generator.js).
 const GROUND_STEP = 3.2;
 
+// Per-tree-type collision radii. Trunk = inscribed circle of the trunk box
+// (matches the half-widths in props.js makeTreeX). Canopy = outermost cone
+// radius — defines the soft "pushing through branches" zone.
+const TREE_TRUNK_R  = { A: 0.25, B: 0.30, C: 0.20 };
+const TREE_CANOPY_R = { A: 1.40, B: 1.60, C: 1.00 };
+
 // Static-scene tri budget for the WASM triangle input buffer. With 5x5
 // chunks at ~4k tris each the raw sum exceeds MAX_TRIS, so the visible-set
 // selector drops the farthest chunks first to keep the upload bounded.
@@ -329,6 +335,33 @@ export class ChunkSystem {
     return this.visibleBeats
       .filter(b => b.type === 'lamp')
       .map(b => [b.x, groundYFast(b.x, b.z), b.z]);
+  }
+
+  /**
+   * Trees with collision radii within `radius` of (x, z). Scans the active 3x3
+   * scope — well outside the player's reach but cheap. Trunk radius is the
+   * inscribed circle of the trunk box; canopy radius is the outer cone extent.
+   */
+  getNearbyTreeColliders(x, z, radius = 3) {
+    const r2 = radius * radius;
+    const out = [];
+    for (const key of this.activeKeys) {
+      const chunk = this.bufferedChunks.get(key);
+      if (!chunk) continue;
+      for (const tree of chunk.trees) {
+        const dx = tree.x - x, dz = tree.z - z;
+        const cR = TREE_CANOPY_R[tree.type] * tree.scale;
+        const reach = radius + cR;
+        if (dx * dx + dz * dz > reach * reach) continue;
+        out.push({
+          x: tree.x,
+          z: tree.z,
+          trunkR: TREE_TRUNK_R[tree.type] * tree.scale,
+          canopyR: cR,
+        });
+      }
+    }
+    return out;
   }
 
   /** Trees near a fireplace, packaged as shadow casters (visible scope). */

@@ -308,7 +308,7 @@ async function start() {
       if (hintTimer > 5) hint.classList.remove('hidden');
     }
 
-    camera.update(dt, input);
+    camera.update(dt, input, chunkSystem);
     const eye = camera.getEye();
     const target = camera.getTarget();
 

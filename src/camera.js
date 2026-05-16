@@ -1,5 +1,6 @@
 import { clamp } from './math.js';
 import { groundYFast } from './world/terrain.js';
+import { canopySpeedScale, resolveTrunkCollisions } from './collision.js';
 
 export class FreeCamera {
   constructor(startPos) {
@@ -16,7 +17,7 @@ export class FreeCamera {
     this.moving = false;
   }
 
-  update(dt, input) {
+  update(dt, input, chunkSystem = null) {
     this.yaw -= input.dx * 0.002;
     this.pitch += input.dy * 0.002;
     this.pitch = clamp(this.pitch, -1.2, 1.2);
@@ -33,10 +34,21 @@ export class FreeCamera {
     const len = Math.sqrt(mx * mx + mz * mz);
     this.moving = len > 0.001;
     if (this.moving) {
-      const spd = input.sprint ? this.speed * this.sprintMultiplier : this.speed;
+      let spd = input.sprint ? this.speed * this.sprintMultiplier : this.speed;
+      const colliders = chunkSystem
+        ? chunkSystem.getNearbyTreeColliders(this.x, this.z, spd * dt + 2.0)
+        : null;
+      if (colliders) spd *= canopySpeedScale(this.x, this.z, colliders);
       const inv = spd * dt / len;
-      this.x += mx * inv;
-      this.z += mz * inv;
+      let nx = this.x + mx * inv;
+      let nz = this.z + mz * inv;
+      if (colliders) {
+        const resolved = resolveTrunkCollisions(nx, nz, colliders);
+        nx = resolved.x;
+        nz = resolved.z;
+      }
+      this.x = nx;
+      this.z = nz;
     }
 
     this.swayTime += dt;
