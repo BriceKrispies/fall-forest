@@ -17,18 +17,16 @@ export const CHUNK_SIZE = 16;
 // Three concentric windows around the player chunk:
 //   ACTIVE_RADIUS     — 3x3, used for gameplay/simulation queries (anchors,
 //                       discovery slots, nearest-slot lookups).
-//   GENERATION_RADIUS — 7x7 buffer. Must be at least one ring larger than
+//   GENERATION_RADIUS — 13x13 buffer. Must be at least one ring larger than
 //                       RENDER_RADIUS so chunks newly entering the visible
 //                       set were already cached on the previous crossing
 //                       — that's what makes "pre-warming" actually happen.
-//   RENDER_RADIUS     — chunks submitted to WASM each frame. 5x5 candidates;
-//                       ring-atomic admission against MAX_TRIS lets the d²≤4
-//                       set (3x3 plus the four cardinal extensions, 13 chunks)
-//                       through, pushing the pop-in boundary out to ~32m
-//                       chunk-center distance instead of ~24m.
+//   RENDER_RADIUS     — chunks submitted to WASM each frame. 9x9 candidates;
+//                       ring-atomic admission against MAX_TRIS will drop the
+//                       outermost rings if the tri budget is exhausted.
 export const ACTIVE_RADIUS = 1;
-export const GENERATION_RADIUS = 3;
-export const RENDER_RADIUS = 2;
+export const GENERATION_RADIUS = 6;
+export const RENDER_RADIUS = 4;
 
 /** World position → chunk coord. */
 export function worldToChunk(x, z, size = CHUNK_SIZE) {
