@@ -733,4 +733,101 @@ export function makeLampPost(x, y, z) {
   return tris;
 }
 
+// ── Discovery geometry ──
+// Standalone chunky shapes used by the procedural discovery system.
+
+const MUSHROOM_CAP_BLUE     = [0.32, 0.42, 0.62];
+const MUSHROOM_CAP_BLUE_LIT = [0.42, 0.55, 0.78];
+const MUSHROOM_STEM         = [0.86, 0.82, 0.7];
+const MUSHROOM_GILL         = [0.55, 0.6, 0.65];
+
+function makeOneMushroom(x, y, z, scale, capLit) {
+  const tris = [];
+  const stemR = 0.07 * scale;
+  const stemH = 0.16 * scale;
+  tris.push(...cylinderTris(x, y, z, stemR, stemH, 6, MUSHROOM_STEM));
+  tris.push(...coneTris(x, y, z, stemR, 0.005, 6, MUSHROOM_GILL));
+  const capR = 0.18 * scale;
+  const capH = 0.13 * scale;
+  const capCol = capLit ? MUSHROOM_CAP_BLUE_LIT : MUSHROOM_CAP_BLUE;
+  tris.push(...coneTris(x, y + stemH - 0.01 * scale, z, capR, capH, 7, capCol));
+  tris.push(...coneTris(x, y + stemH - 0.005 * scale, z, capR, 0.002, 7, MUSHROOM_GILL));
+  return tris;
+}
+
+/**
+ * Cluster of chunky blue mushrooms arranged in a loose ring of `count`
+ * caps around (x, y, z). Deterministic from `seed`.
+ */
+export function makeBlueMushroomCluster(x, y, z, radius = 0.6, count = 6, seed = 0) {
+  const tris = [];
+  for (let i = 0; i < count; i++) {
+    const a = (i / count) * Math.PI * 2 + Math.sin(seed + i * 1.7) * 0.4;
+    const r = radius * (0.6 + Math.abs(Math.cos(seed + i * 3.1)) * 0.55);
+    const mx = x + Math.cos(a) * r;
+    const mz = z + Math.sin(a) * r;
+    const scale = 0.7 + Math.abs(Math.sin(seed * 1.3 + i * 0.7)) * 0.6;
+    const litVariant = (i & 1) === 0;
+    tris.push(...makeOneMushroom(mx, y, mz, scale, litVariant));
+  }
+  tris.push(...makeContactShadow(x, y, z, radius * 0.9));
+  return tris;
+}
+
+const TOTEM_DARK  = [0.32, 0.2, 0.1];
+const TOTEM_MID   = [0.42, 0.28, 0.16];
+const TOTEM_LIGHT = [0.58, 0.42, 0.25];
+const TOTEM_EYE   = [0.95, 0.85, 0.45];
+const TOTEM_BEAK  = [0.85, 0.55, 0.18];
+
+/**
+ * Chunky owl-shaped totem — a stacked stump with a hinted face and a
+ * pyramidal cap, slightly larger and warmer than a normal stump.
+ */
+export function makeOwlTotem(x, y, z, scale = 1, rot = 0) {
+  let tris = [];
+  const baseH = 0.55 * scale;
+  const baseR = 0.22 * scale;
+  tris.push(...cylinderTris(0, 0, 0, baseR, baseH, 7, TOTEM_DARK));
+  tris.push(...coneTris(0, baseH * 0.5, 0, baseR + 0.025 * scale, 0.04 * scale, 7, TOTEM_MID));
+
+  const headBot = baseH;
+  const headH = 0.32 * scale;
+  const headR = 0.24 * scale;
+  tris.push(...cylinderTris(0, headBot, 0, headR, headH, 7, TOTEM_MID));
+
+  const eyeY = headBot + headH * 0.65;
+  const eyeOff = 0.09 * scale;
+  const eyeR = 0.05 * scale;
+  tris.push(...pyramidTris( eyeOff, eyeY, headR * 0.85, eyeR, 0.02 * scale, 5, TOTEM_EYE));
+  tris.push(...pyramidTris(-eyeOff, eyeY, headR * 0.85, eyeR, 0.02 * scale, 5, TOTEM_EYE));
+  tris.push(...pyramidTris(0, eyeY - 0.05 * scale, headR * 0.95, 0.04 * scale, 0.05 * scale, 4, TOTEM_BEAK));
+
+  const tuftY = headBot + headH;
+  tris.push(...pyramidTris( eyeOff * 0.9, tuftY, 0, 0.05 * scale, 0.09 * scale, 4, TOTEM_LIGHT));
+  tris.push(...pyramidTris(-eyeOff * 0.9, tuftY, 0, 0.05 * scale, 0.09 * scale, 4, TOTEM_LIGHT));
+
+  tris = rotateTrisY(tris, rot);
+  tris = translate(tris, [x, y, z]);
+  tris.push(...makeContactShadow(x, y, z, baseR + 0.04 * scale));
+  return tris;
+}
+
+/**
+ * Smaller "remains" version of the owl totem used when the player has
+ * already collected this instance — a weather-worn stump with the eyes
+ * gone, no beak, no tufts.
+ */
+export function makeOwlTotemRemains(x, y, z, scale = 1, rot = 0) {
+  let tris = [];
+  const baseH = 0.32 * scale;
+  const baseR = 0.20 * scale;
+  tris.push(...cylinderTris(0, 0, 0, baseR, baseH, 7, TOTEM_DARK));
+  tris.push(...coneTris(0, baseH, 0, baseR * 0.95, 0.04 * scale, 7, TOTEM_MID));
+  tris = rotateTrisY(tris, rot);
+  tris = translate(tris, [x, y, z]);
+  tris.push(...makeContactShadow(x, y, z, baseR + 0.03 * scale));
+  return tris;
+}
+
 export { translate, rotateTrisY, scaleTris, makeTreeShadow, makeRockShadow, makeStumpShadow, makeLogShadow, makeBushShadow };

@@ -13,6 +13,9 @@ import { groundYFast } from './world/terrain.js';
 import { SLOT_TYPES } from './world/discovery-slots.js';
 import { generateAllHorrors } from './horror-gen.js';
 import { renderHorrors, renderHorrorDebug } from './horror-renderer.js';
+import { createDefaultRegistry } from './world/discoveries/index.js';
+import { SpawnLedger } from './world/generation/spawn-ledger.js';
+import { CollectionState } from './world/generation/collection-state.js';
 
 const RENDER_W = 320;
 const RENDER_H = 200;
@@ -48,6 +51,17 @@ async function start() {
   const rain = new Rain();
   const chunkSystem = new ChunkSystem();
 
+  // Discovery services — registered before the first chunk generates so
+  // the initial buffer load already includes discovery placements.
+  const discoveryRegistry = createDefaultRegistry();
+  const spawnLedger = new SpawnLedger();
+  const collectionState = new CollectionState(chunkSystem.worldSeed);
+  chunkSystem.setDiscoveryServices({
+    registry: discoveryRegistry,
+    spawnLedger,
+    collectionState,
+  });
+
   wasm.set_screen(RENDER_W, RENDER_H);
   uploadSunDir(lighting.sunDir);
   // Fog ramp 30→112m — doubled from the original 15→56m to match the doubled
@@ -57,6 +71,33 @@ async function start() {
 
   // Initial chunk load at player start position (3x3 around the player).
   chunkSystem.update(camera.x, camera.z);
+
+  // Tiny DOM hint shown when a discovery is found.
+  const discoveryHint = document.createElement('div');
+  discoveryHint.id = 'discovery-hint';
+  Object.assign(discoveryHint.style, {
+    position: 'fixed',
+    bottom: '24px',
+    left: '50%',
+    transform: 'translateX(-50%)',
+    padding: '6px 14px',
+    fontFamily: 'Georgia, serif',
+    fontSize: '14px',
+    color: 'rgba(255, 240, 210, 0.85)',
+    background: 'rgba(0, 0, 0, 0.35)',
+    borderRadius: '2px',
+    pointerEvents: 'none',
+    opacity: '0',
+    transition: 'opacity 400ms ease',
+    zIndex: '50',
+  });
+  document.body.appendChild(discoveryHint);
+  let discoveryHintTimer = 0;
+  function showDiscoveryHint(text) {
+    discoveryHint.textContent = text;
+    discoveryHint.style.opacity = '1';
+    discoveryHintTimer = 2.5;
+  }
 
   const input = { forward: false, backward: false, left: false, right: false, sprint: false, dx: 0, dy: 0 };
   let locked = false;
@@ -269,6 +310,25 @@ async function start() {
     return `teleported to ${x.toFixed(1)}, ${z.toFixed(1)}`;
   }, 'Teleport to (x, z)');
 
+  // Register /discoveries command — summary of registry + collection state.
+  //   /discoveries          — print summary
+  //   /discoveries reset    — wipe collected/seen state for this seed
+  commands.register('discoveries', (args, state) => {
+    const arg = (args || '').trim().toLowerCase();
+    if (arg === 'reset') {
+      collectionState.reset();
+      spawnLedger.reset();
+      state.chunkSystem.reset();
+      state.chunkSystem.update(state.camera.x, state.camera.z);
+      return 'discoveries: reset';
+    }
+    const snap = collectionState.getSnapshot();
+    const led = spawnLedger.getSnapshot();
+    const recent = led.history.slice(-3).map(h =>
+      `${h.id}@${h.distance.toFixed(0)}m`).join(', ') || 'none';
+    return `seed:0x${snap.worldSeed.toString(16)} collected:${snap.collected.length} seen:${snap.seen.length} recent:[${recent}]`;
+  }, 'Discovery system summary (/discoveries reset to wipe)');
+
   // Register /horror command
   commands.register('horror', (args, state) => {
     const arg = (args || '').trim().toLowerCase();
@@ -314,6 +374,28 @@ async function start() {
 
     // Stream chunks around player (3x3 window centered on the player's chunk)
     chunkSystem.update(eye[0], eye[2]);
+
+    // Proximity-based discovery collection. Walking through a collectible
+    // marks it in CollectionState and shows a tiny DOM hint. Already-
+    // collected instances are inert (the chunk regenerated them as
+    // "remains" geometry).
+    const discoveries = chunkSystem.getActiveDiscoveries();
+    for (let i = 0; i < discoveries.length; i++) {
+      const d = discoveries[i];
+      if (!d.collectible) continue;
+      if (collectionState.isCollected(d.instanceId)) continue;
+      const dx = d.x - eye[0], dz = d.z - eye[2];
+      const r = d.collectRadius || 1.4;
+      if (dx * dx + dz * dz <= r * r) {
+        if (collectionState.markCollected(d.instanceId)) {
+          showDiscoveryHint(`found: ${d.label}`);
+        }
+      }
+    }
+    if (discoveryHintTimer > 0) {
+      discoveryHintTimer -= dt;
+      if (discoveryHintTimer <= 0) discoveryHint.style.opacity = '0';
+    }
 
     // Update day/night cycle (time scale controlled by active world mode)
     lighting.update(simDt * worldMode.timeScale);

@@ -16,6 +16,8 @@ import { generatePathNodes } from './path-gen.js';
 import { groundY, groundYFast, setContext, clearContext, groundColor } from './terrain.js';
 import { planAnchors } from './scenic-anchors.js';
 import { buildSlotsForAnchor } from './discovery-slots.js';
+import { createChunkContext } from './generation/chunk-context.js';
+import { eligibleRarities } from './generation/rarity-budget.js';
 import {
   makeBush, makeFlowerPatch, makeGrassClump,
   makeRock, makeStump, makeLog, makeGroundPatch,
@@ -427,10 +429,13 @@ export function buildNeighborhoodContext(worldSeed, cx, cz, size) {
  * @param {number} worldSeed
  * @param {number} cx
  * @param {number} cz
- * @param {number} size  Chunk edge length in meters.
+ * @param {number} size            Chunk edge length in meters.
+ * @param {object} [discoverySvc]  Optional discovery services
+ *   { registry, spawnLedger, collectionState }. If omitted, no
+ *   discoveries are placed (keeps the generator usable in tests).
  * @returns Chunk record (immutable until the chunk is unloaded).
  */
-export function generateChunk(worldSeed, cx, cz, size) {
+export function generateChunk(worldSeed, cx, cz, size, discoverySvc = null) {
   const bounds = chunkBounds(cx, cz, size);
 
   // Path lives only in the cx=0 column. Other chunks have no path.
@@ -449,9 +454,26 @@ export function generateChunk(worldSeed, cx, cz, size) {
   // groundY() agrees at every shared chunk boundary. Without the neighbor
   // chunks here, a tree mound at z=zMax-0.5 would deform our edge but not
   // the neighbor's edge → visible seam.
-  const ctx = buildNeighborhoodContext(worldSeed, cx, cz, size);
-  setContext(ctx.pathNodes, ctx.features);
+  const tctx = buildNeighborhoodContext(worldSeed, cx, cz, size);
+  setContext(tctx.pathNodes, tctx.features);
+
+  // Discovery placement runs while terrain context is live so place()
+  // hooks can call groundY for accurate Y. Discoveries mutate `plan`
+  // (additional log/flower/stump entries) and append to `extraTris`
+  // (ad-hoc geometry like mushrooms and totems).
+  const extraTris = [];
+  const discoveries = discoverySvc
+    ? runDiscoveryPass({
+        worldSeed, cx, cz, size,
+        pathNodes, anchors, plan, extraTris,
+        discoverySvc,
+      })
+    : [];
+
   const { tris, trees } = buildChunkTris(worldSeed, cx, cz, size, pathNodes, plan);
+  if (extraTris.length > 0) {
+    for (let i = 0; i < extraTris.length; i++) tris.push(extraTris[i]);
+  }
   clearContext();
 
   // Discovery slots are derived from anchor data; they use groundYFast
@@ -477,8 +499,74 @@ export function generateChunk(worldSeed, cx, cz, size) {
     scenicBeats: plan.scenicBeats,
     anchors,
     slots,
+    discoveries,
     triCount: tris.length,
   };
+}
+
+/**
+ * Run the discovery selection + placement pass for a single chunk.
+ *
+ * Process:
+ *   1. Build a ChunkContext.
+ *   2. Ask the rarity budget which rarities are eligible at this distance.
+ *   3. Ask the registry for candidate definitions in those rarities.
+ *   4. Filter by minDistanceFromStart, canSpawn(ctx), and ledger cooldowns.
+ *   5. Roll one candidate using the chunk's deterministic RNG. The same
+ *      candidate may be skipped if the registry returns nothing eligible.
+ *   6. Call place(ctx) and recordSpawn.
+ *
+ * Returns the placed discovery instance records (possibly empty).
+ */
+function runDiscoveryPass({
+  worldSeed, cx, cz, size,
+  pathNodes, anchors, plan, extraTris,
+  discoverySvc,
+}) {
+  const { registry, spawnLedger, collectionState } = discoverySvc;
+
+  const context = createChunkContext({
+    worldSeed, cx, cz, size,
+    pathNodes, anchors, plan, extraTris,
+    spawnLedger, collectionState,
+    groundY, groundYFast,
+  });
+
+  // Deterministic RNG used for both rarity threshold rolls and the final
+  // candidate pick. Distinct from base generation streams via the salt.
+  const decisionRNG = createRNG(hashChunkCoord(worldSeed ^ 0xD15C0FE7, cx, cz));
+
+  const allowed = eligibleRarities(spawnLedger, context.chunkCenterDistance, decisionRNG);
+  if (!allowed.common && !allowed.uncommon && !allowed.rare) return [];
+
+  const candidates = registry.candidatesForRarities(allowed);
+  if (candidates.length === 0) return [];
+
+  const distance = context.chunkCenterDistance;
+  const eligible = [];
+  for (const def of candidates) {
+    if (distance < (def.minDistanceFromStart || 0)) continue;
+    if (!spawnLedger.canSpawnDiscovery(def, distance)) continue;
+    if (!def.canSpawn(context)) continue;
+    eligible.push(def);
+  }
+  if (eligible.length === 0) return [];
+
+  // Pick one deterministically.
+  const idx = Math.floor(decisionRNG.next() * eligible.length);
+  const chosen = eligible[idx];
+
+  const placed = chosen.place(context) || [];
+  spawnLedger.recordSpawn(chosen, distance);
+
+  // Auto-mark seen for any non-collected instance the player will encounter.
+  for (const inst of placed) {
+    if (inst && inst.instanceId) {
+      collectionState.markSeen(inst.instanceId);
+    }
+  }
+
+  return placed;
 }
 
 /**

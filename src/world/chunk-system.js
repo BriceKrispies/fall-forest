@@ -61,6 +61,12 @@ export class ChunkSystem {
     this.generationRadius = GENERATION_RADIUS;
     this.renderRadius = RENDER_RADIUS;
 
+    // Discovery services injected by main.js. When unset, generation
+    // runs without the discovery pass (useful for tests / scripts).
+    this.discoveryRegistry = null;
+    this.spawnLedger = null;
+    this.collectionState = null;
+
     /** key → chunk record (everything inside the buffered window). */
     this.bufferedChunks = new Map();
     /** Subset of `bufferedChunks` keys used for gameplay/simulation. */
@@ -140,6 +146,41 @@ export class ChunkSystem {
     this.activeAnchors = [];
     this.activeSlots = [];
     this.totalTriCount = 0;
+    // Per-session pacing resets too: a new seed is a new world.
+    if (this.spawnLedger) this.spawnLedger.reset();
+    if (this.collectionState && newSeed !== undefined) {
+      this.collectionState.setWorldSeed(newSeed);
+    }
+  }
+
+  /** Inject the discovery system. Safe to call after construction. */
+  setDiscoveryServices({ registry, spawnLedger, collectionState }) {
+    this.discoveryRegistry = registry || null;
+    this.spawnLedger = spawnLedger || null;
+    this.collectionState = collectionState || null;
+  }
+
+  _discoverySvc() {
+    if (!this.discoveryRegistry || !this.spawnLedger || !this.collectionState) return null;
+    return {
+      registry: this.discoveryRegistry,
+      spawnLedger: this.spawnLedger,
+      collectionState: this.collectionState,
+    };
+  }
+
+  /**
+   * Flat list of discovery instances across the active 3x3 scope. Used
+   * by the proximity-collection loop in main.js.
+   */
+  getActiveDiscoveries() {
+    const out = [];
+    for (const key of this.activeKeys) {
+      const chunk = this.bufferedChunks.get(key);
+      if (!chunk || !chunk.discoveries) continue;
+      for (let i = 0; i < chunk.discoveries.length; i++) out.push(chunk.discoveries[i]);
+    }
+    return out;
   }
 
   /**
@@ -164,7 +205,10 @@ export class ChunkSystem {
     for (const { cx: ncx, cz: ncz } of needed) {
       const key = chunkKey(ncx, ncz);
       if (!this.bufferedChunks.has(key)) {
-        const chunk = generateChunk(this.worldSeed, ncx, ncz, this.chunkSize);
+        const chunk = generateChunk(
+          this.worldSeed, ncx, ncz, this.chunkSize,
+          this._discoverySvc(),
+        );
         this.bufferedChunks.set(key, chunk);
         changed = true;
       }
