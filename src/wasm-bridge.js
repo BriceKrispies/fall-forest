@@ -118,6 +118,34 @@ export function uploadTriangles(tris) {
   return count;
 }
 
+/**
+ * Upload triangles from a list of pre-flattened per-chunk Float32Arrays.
+ * Each entry is `chunk.flatTris` (length = triCount * 12) — one typed-
+ * array memcpy per chunk replaces ~12 scalar writes per triangle.
+ * Drops trailing chunks whose tris would overflow LAYOUT.MAX_TRIS.
+ */
+export function uploadTrianglesFlat(chunks) {
+  const baseOff = LAYOUT.OFF_TRI_IN >> 2;
+  const maxFloats = LAYOUT.MAX_TRIS * 12;
+  let writtenFloats = 0;
+  for (let i = 0; i < chunks.length; i++) {
+    const flat = chunks[i].flatTris;
+    if (!flat || flat.length === 0) continue;
+    if (writtenFloats + flat.length > maxFloats) {
+      const remaining = maxFloats - writtenFloats;
+      if (remaining <= 0) break;
+      f32View.set(flat.subarray(0, remaining), baseOff + writtenFloats);
+      writtenFloats += remaining;
+      break;
+    }
+    f32View.set(flat, baseOff + writtenFloats);
+    writtenFloats += flat.length;
+  }
+  const count = (writtenFloats / 12) | 0;
+  wasm.set_tri_count(count);
+  return count;
+}
+
 export function readVisibleTris(count) {
   const base = LAYOUT.OFF_TRI_OUT >> 2;
   const result = [];

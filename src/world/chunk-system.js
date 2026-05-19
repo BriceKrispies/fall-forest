@@ -37,7 +37,7 @@ import {
 } from './chunk-coords.js';
 import { DEFAULT_WORLD_SEED } from './seed.js';
 import { groundY, groundYFast, setContext, clearContext } from './terrain.js';
-import { uploadTriangles, uploadGrassInstances, LAYOUT } from '../wasm-bridge.js';
+import { uploadTrianglesFlat, uploadGrassInstances, LAYOUT } from '../wasm-bridge.js';
 
 // Ground-patch tiling step (must match chunk-generator.js).
 const GROUND_STEP = 3.2;
@@ -85,6 +85,13 @@ export class ChunkSystem {
     this._lastHopDx = 0;
     this._lastHopDz = 0;
 
+    // Buffer pre-warm queue. Chunks at chunk-grid distance > activeRadius
+    // from the player are generated incrementally across frames under a
+    // time budget; the active 3x3 ring stays synchronous so collision,
+    // path queries, and the visible set's nearest ring never see a hole.
+    this._pendingChunks = new Set();
+    this._generationBudgetMs = 3;
+
     // Number of chunks inside the render window that were dropped because the
     // running tri budget exceeded MAX_TRIS. Surfaced via getDebugInfo so it's
     // obvious when the render window asks for more than the WASM buffer can
@@ -114,21 +121,51 @@ export class ChunkSystem {
    */
   update(playerX, playerZ) {
     const { cx, cz } = this.coordFor(playerX, playerZ);
-    if (cx === this.currentCx && cz === this.currentCz) return false;
+    const crossed = cx !== this.currentCx || cz !== this.currentCz;
+    if (!crossed && this._pendingChunks.size === 0) return false;
 
-    if (this.currentCx !== null) {
-      this._lastHopDx = cx - this.currentCx;
-      this._lastHopDz = cz - this.currentCz;
+    let bufferChanged = false;
+    let activeChanged = false;
+    let visibleChanged = false;
+
+    if (crossed) {
+      if (this.currentCx !== null) {
+        this._lastHopDx = cx - this.currentCx;
+        this._lastHopDz = cz - this.currentCz;
+      }
+      this.currentCx = cx;
+      this.currentCz = cz;
+      bufferChanged = this._refreshBuffer(cx, cz);
+      activeChanged = this._refreshActiveScope(cx, cz);
+      visibleChanged = this._refreshVisibleScope(cx, cz);
     }
-    this.currentCx = cx;
-    this.currentCz = cz;
 
-    const bufferChanged = this._refreshBuffer(cx, cz);
-    const activeChanged = this._refreshActiveScope(cx, cz);
-    const visibleChanged = this._refreshVisibleScope(cx, cz);
+    // Time-budgeted drain. Runs every frame while the queue has work —
+    // chunks the player hasn't reached yet may take several frames to
+    // become available, which is fine because the pre-warm band is at
+    // least one chunk wider than the render radius.
+    const produced = this._drainQueue(this._generationBudgetMs);
+    if (produced > 0) {
+      bufferChanged = true;
+      if (this._refreshActiveScope(this.currentCx, this.currentCz)) activeChanged = true;
+      if (this._refreshVisibleScope(this.currentCx, this.currentCz)) visibleChanged = true;
+    }
 
     if (visibleChanged) this._rebuildVisible();
     return bufferChanged || activeChanged || visibleChanged;
+  }
+
+  /**
+   * Synchronously generate every chunk currently in the pre-warm queue.
+   * Used after construction and after seed/window changes so the first
+   * rendered frame has a complete buffer; never called inside the frame
+   * loop.
+   */
+  prewarm() {
+    if (this._pendingChunks.size === 0) return;
+    this._drainQueue(Infinity);
+    this._refreshActiveScope(this.currentCx, this.currentCz);
+    if (this._refreshVisibleScope(this.currentCx, this.currentCz)) this._rebuildVisible();
   }
 
   /** Force a full reload (used after a seed change). */
@@ -146,6 +183,7 @@ export class ChunkSystem {
     this.activeAnchors = [];
     this.activeSlots = [];
     this.totalTriCount = 0;
+    this._pendingChunks.clear();
     // Per-session pacing resets too: a new seed is a new world.
     if (this.spawnLedger) this.spawnLedger.reset();
     if (this.collectionState && newSeed !== undefined) {
@@ -185,9 +223,11 @@ export class ChunkSystem {
 
   /**
    * Update the buffered window: evict chunks that left the (2R+1)^2 region,
-   * generate any that are new. Generation order is nearest-first with a bias
-   * in the player's last hop direction so chunks ahead of the player become
-   * ready before chunks behind.
+   * synchronously generate the active 3x3 ring, and enqueue everything
+   * else for time-budgeted pre-warm by `_drainQueue`.
+   *
+   * Generation order across calls is nearest-first with a bias toward the
+   * player's last hop direction — the same logic the eager version used.
    */
   _refreshBuffer(cx, cz) {
     const needed = chunkCoordsByDistance(
@@ -196,24 +236,79 @@ export class ChunkSystem {
     const neededKeys = new Set(needed.map(c => chunkKey(c.cx, c.cz)));
     let changed = false;
 
+    // Evict chunks that left the buffer.
     for (const key of [...this.bufferedChunks.keys()]) {
       if (!neededKeys.has(key)) {
         this.bufferedChunks.delete(key);
         changed = true;
       }
     }
+    // Drop pending entries that left the buffer (e.g. player teleported).
+    for (const key of [...this._pendingChunks]) {
+      if (!neededKeys.has(key)) this._pendingChunks.delete(key);
+    }
+
+    const aR = this.activeRadius;
     for (const { cx: ncx, cz: ncz } of needed) {
       const key = chunkKey(ncx, ncz);
-      if (!this.bufferedChunks.has(key)) {
+      if (this.bufferedChunks.has(key)) continue;
+      const dx = ncx - cx, dz = ncz - cz;
+      const inActive = Math.abs(dx) <= aR && Math.abs(dz) <= aR;
+      if (inActive) {
         const chunk = generateChunk(
           this.worldSeed, ncx, ncz, this.chunkSize,
           this._discoverySvc(),
         );
         this.bufferedChunks.set(key, chunk);
+        this._pendingChunks.delete(key);
         changed = true;
+      } else {
+        this._pendingChunks.add(key);
       }
     }
     return changed;
+  }
+
+  /**
+   * Pop chunks from the pre-warm queue under a wall-clock time budget.
+   * Sorting per-call (rather than maintaining a heap) is fine — queue
+   * sizes are bounded by the generation window (~150 keys max) and the
+   * comparator is trivial. Returns the count of chunks produced.
+   */
+  _drainQueue(budgetMs) {
+    if (this._pendingChunks.size === 0) return 0;
+    const ranked = [];
+    const cx = this.currentCx, cz = this.currentCz;
+    const hx = this._lastHopDx, hz = this._lastHopDz;
+    for (const key of this._pendingChunks) {
+      const comma = key.indexOf(',');
+      const ncx = +key.slice(0, comma);
+      const ncz = +key.slice(comma + 1);
+      const dx = ncx - cx, dz = ncz - cz;
+      ranked.push({ key, ncx, ncz, d2: dx * dx + dz * dz, front: dx * hx + dz * hz });
+    }
+    ranked.sort((a, b) => {
+      if (a.d2 !== b.d2) return a.d2 - b.d2;
+      return b.front - a.front;
+    });
+
+    const t0 = performance.now();
+    let produced = 0;
+    for (const { key, ncx, ncz } of ranked) {
+      // Always make at least one chunk of progress per call. Checking
+      // the budget *after* the first iteration keeps a forward-walking
+      // player from ever sitting on a queue that doesn't drain.
+      if (produced > 0 && budgetMs !== Infinity &&
+          performance.now() - t0 >= budgetMs) break;
+      const chunk = generateChunk(
+        this.worldSeed, ncx, ncz, this.chunkSize,
+        this._discoverySvc(),
+      );
+      this.bufferedChunks.set(key, chunk);
+      this._pendingChunks.delete(key);
+      produced++;
+    }
+    return produced;
   }
 
   /** Recompute the active 3x3 set + cached anchor/slot lists. */
@@ -290,7 +385,7 @@ export class ChunkSystem {
       let ringTris = 0;
       let j = i;
       while (j < candidates.length && candidates[j].d2 === ringD2) {
-        ringTris += this.bufferedChunks.get(candidates[j].key).tris.length;
+        ringTris += this.bufferedChunks.get(candidates[j].key).triCount;
         j++;
       }
       if (tris + ringTris <= STATIC_TRI_BUDGET) {
@@ -325,7 +420,7 @@ export class ChunkSystem {
       return da - db;
     });
 
-    const allTris = [];
+    const visChunks = [];
     const allGrass = [];
     const allBeats = [];
     const allPathNodes = [];
@@ -333,13 +428,13 @@ export class ChunkSystem {
     for (const key of keys) {
       const chunk = this.bufferedChunks.get(key);
       if (!chunk) continue;
-      for (let i = 0; i < chunk.tris.length; i++) allTris.push(chunk.tris[i]);
+      visChunks.push(chunk);
       for (let i = 0; i < chunk.grassInstances.length; i++) allGrass.push(chunk.grassInstances[i]);
       for (let i = 0; i < chunk.scenicBeats.length; i++) allBeats.push(chunk.scenicBeats[i]);
       for (let i = 0; i < chunk.pathNodes.length; i++) allPathNodes.push(chunk.pathNodes[i]);
     }
 
-    this.totalTriCount = uploadTriangles(allTris);
+    this.totalTriCount = uploadTrianglesFlat(visChunks);
     this._submittedTriCount = this.totalTriCount;
     uploadGrassInstances(allGrass);
     this.visibleBeats = allBeats;
@@ -362,8 +457,10 @@ export class ChunkSystem {
       const cx = this.currentCx, cz = this.currentCz;
       this.currentCx = null;
       this.currentCz = null;
-      // Force the boundary-cross path to run.
+      // Force the boundary-cross path to run, then drain so the new
+      // window is fully populated before the next render.
       this.update(cx * this.chunkSize, cz * this.chunkSize);
+      this.prewarm();
     }
   }
 

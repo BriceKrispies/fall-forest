@@ -476,6 +476,12 @@ export function generateChunk(worldSeed, cx, cz, size, discoverySvc = null) {
   }
   clearContext();
 
+  // Pre-flatten the static tri list to a Float32Array. The visible-set
+  // upload (ChunkSystem._rebuildVisible) memcpies these arrays straight
+  // into the WASM input buffer instead of writing 12 scalars per tri.
+  // The array-of-triangles form is no longer needed after this point.
+  const flatTris = flattenTris(tris);
+
   // Discovery slots are derived from anchor data; they use groundYFast
   // (macro + zone layers only) so the Y is consistent with runtime
   // queries from the player's perspective.
@@ -493,7 +499,7 @@ export function generateChunk(worldSeed, cx, cz, size, discoverySvc = null) {
     cx, cz,
     bounds,
     pathNodes,
-    tris,
+    flatTris,
     trees,
     grassInstances,
     scenicBeats: plan.scenicBeats,
@@ -502,6 +508,24 @@ export function generateChunk(worldSeed, cx, cz, size, discoverySvc = null) {
     discoveries,
     triCount: tris.length,
   };
+}
+
+/**
+ * Flatten Array<[v0, v1, v2, color]> into a single Float32Array laid out
+ * as 12 floats per triangle (v0xyz, v1xyz, v2xyz, rgb) — the exact layout
+ * the WASM input buffer expects.
+ */
+function flattenTris(tris) {
+  const out = new Float32Array(tris.length * 12);
+  for (let i = 0; i < tris.length; i++) {
+    const t = tris[i];
+    const o = i * 12;
+    out[o]      = t[0][0]; out[o + 1]  = t[0][1]; out[o + 2]  = t[0][2];
+    out[o + 3]  = t[1][0]; out[o + 4]  = t[1][1]; out[o + 5]  = t[1][2];
+    out[o + 6]  = t[2][0]; out[o + 7]  = t[2][1]; out[o + 8]  = t[2][2];
+    out[o + 9]  = t[3][0]; out[o + 10] = t[3][1]; out[o + 11] = t[3][2];
+  }
+  return out;
 }
 
 /**

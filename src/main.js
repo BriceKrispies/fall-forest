@@ -70,8 +70,11 @@ async function start() {
   // outermost rendered chunks fade rather than pop.
   uploadConstants(30, 112, 0.32);
 
-  // Initial chunk load at player start position (3x3 around the player).
+  // Initial chunk load at player start position. Update enqueues the
+  // outer-buffer chunks; prewarm forces them through synchronously so
+  // the first rendered frame has a complete buffer.
   chunkSystem.update(camera.x, camera.z);
+  chunkSystem.prewarm();
 
   // Tiny DOM hint shown when a discovery is found.
   const discoveryHint = document.createElement('div');
@@ -256,6 +259,7 @@ async function start() {
     if (isNaN(val)) return 'invalid seed';
     state.chunkSystem.reset(val >>> 0);
     state.chunkSystem.update(state.camera.x, state.camera.z);
+    state.chunkSystem.prewarm();
     return `seed: 0x${state.chunkSystem.worldSeed.toString(16)}`;
   }, 'Show or set world seed');
 
@@ -333,6 +337,7 @@ async function start() {
       spawnLedger.reset();
       state.chunkSystem.reset();
       state.chunkSystem.update(state.camera.x, state.camera.z);
+      state.chunkSystem.prewarm();
       return 'discoveries: reset';
     }
     const snap = collectionState.getSnapshot();
