@@ -7,7 +7,7 @@
  */
 
 export function initHarness(game) {
-  const { camera, renderer, renderStep, RENDER_W, RENDER_H } = game;
+  const { camera, renderer, chunkSystem, input, renderStep, RENDER_W, RENDER_H } = game;
 
   /**
    * Sample a pixel at (x, y) from the current frame buffer.
@@ -249,6 +249,139 @@ export function initHarness(game) {
     };
   }
 
+  /**
+   * Force the camera to walk forward (optionally sprinting) for `seconds`
+   * of wall-clock time, sampling per-frame dt and the player's chunk coord
+   * each frame. Reports frame-time statistics and flags the worst hitches.
+   *
+   * Use this to investigate FPS drops on chunk-boundary crossings: a clean
+   * straight-line walk through fresh terrain will hit each boundary in
+   * sequence and surface every generation hitch.
+   *
+   * Returns a Promise that resolves with the report. Restores the input
+   * state on completion regardless of how it exits.
+   */
+  function movementProfile({ seconds = 6, sprint = true, yaw = 0 } = {}) {
+    if (!input) {
+      return Promise.resolve({ error: 'no input handle in harness' });
+    }
+    const prev = { forward: input.forward, sprint: input.sprint };
+    const samples = []; // { t, dt, chunk: {cx,cz} }
+    camera.yaw = yaw;
+    input.forward = true;
+    input.sprint = sprint;
+    let stop = false;
+    const startCx = chunkSystem ? chunkSystem.currentCx : null;
+    const startCz = chunkSystem ? chunkSystem.currentCz : null;
+    const startPos = [camera.x, camera.z];
+
+    return new Promise((resolve) => {
+      let last = performance.now();
+      const t0 = last;
+      function tick(now) {
+        const dt = (now - last) / 1000;
+        last = now;
+        samples.push({
+          t: (now - t0) / 1000,
+          dt,
+          cx: chunkSystem ? chunkSystem.currentCx : null,
+          cz: chunkSystem ? chunkSystem.currentCz : null,
+        });
+        if (stop || (now - t0) / 1000 >= seconds) {
+          input.forward = prev.forward;
+          input.sprint = prev.sprint;
+          resolve(buildReport(samples, startCx, startCz, startPos));
+          return;
+        }
+        requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+    });
+  }
+
+  function buildReport(samples, startCx, startCz, startPos) {
+    // Drop the first sample (its dt is from before the profile started).
+    const s = samples.slice(1);
+    const dts = s.map(x => x.dt * 1000); // ms
+    dts.sort((a, b) => a - b);
+    const sum = dts.reduce((a, b) => a + b, 0);
+    const avg = sum / dts.length;
+    const p50 = dts[Math.floor(dts.length * 0.5)];
+    const p95 = dts[Math.floor(dts.length * 0.95)];
+    const p99 = dts[Math.floor(dts.length * 0.99)];
+    const max = dts[dts.length - 1];
+
+    // Detect chunk-boundary crossings: where (cx,cz) changes.
+    const crossings = [];
+    let prev = { cx: startCx, cz: startCz };
+    for (let i = 0; i < s.length; i++) {
+      const cur = s[i];
+      if (cur.cx === null) continue;
+      if (cur.cx !== prev.cx || cur.cz !== prev.cz) {
+        crossings.push({
+          t: +cur.t.toFixed(3),
+          dtMs: +(cur.dt * 1000).toFixed(2),
+          from: prev,
+          to: { cx: cur.cx, cz: cur.cz },
+        });
+        prev = { cx: cur.cx, cz: cur.cz };
+      }
+    }
+
+    // Frames whose dt exceeded 2× the median — likely hitches.
+    const hitchThreshold = p50 * 2.2;
+    const hitches = s
+      .map((x, i) => ({ i, t: +x.t.toFixed(3), dtMs: +(x.dt * 1000).toFixed(2), cx: x.cx, cz: x.cz }))
+      .filter(x => x.dtMs >= hitchThreshold)
+      .slice(0, 20);
+
+    return {
+      sampleCount: s.length,
+      durationSec: +s[s.length - 1].t.toFixed(2),
+      frameTimeMs: {
+        avg: +avg.toFixed(2),
+        p50: +p50.toFixed(2),
+        p95: +p95.toFixed(2),
+        p99: +p99.toFixed(2),
+        max: +max.toFixed(2),
+      },
+      startPos,
+      endPos: [camera.x, camera.z],
+      distanceMoved: +Math.hypot(camera.x - startPos[0], camera.z - startPos[1]).toFixed(2),
+      chunkCrossings: crossings,
+      hitchThresholdMs: +hitchThreshold.toFixed(2),
+      hitches,
+    };
+  }
+
+  /**
+   * Synchronous variant that doesn't drive the rAF loop — it directly
+   * times generateChunk-style work via chunkSystem by stepping the
+   * camera through fresh coords and forcing buffer refreshes.
+   */
+  function chunkLoadCost(distance = 64, step = 1.5) {
+    if (!chunkSystem) return { error: 'no chunkSystem in harness' };
+    const startX = camera.x, startZ = camera.z;
+    const samples = [];
+    let x = startX, z = startZ;
+    for (let d = 0; d < distance; d += step) {
+      x += step;
+      const t0 = performance.now();
+      chunkSystem.update(x, z);
+      const t1 = performance.now();
+      samples.push({ x, ms: +(t1 - t0).toFixed(2) });
+    }
+    camera.x = startX; camera.z = startZ;
+    chunkSystem.update(startX, startZ);
+    const nonzero = samples.filter(s => s.ms > 0.1);
+    nonzero.sort((a, b) => b.ms - a.ms);
+    return {
+      samples: samples.length,
+      hitches: nonzero.slice(0, 10),
+      totalMs: +samples.reduce((s, x) => s + x.ms, 0).toFixed(2),
+    };
+  }
+
   const harness = {
     samplePixel,
     sampleColumn,
@@ -259,6 +392,8 @@ export function initHarness(game) {
     diagnoseSnap,
     snapshot,
     diffSnapshots,
+    movementProfile,
+    chunkLoadCost,
   };
 
   if (typeof window !== 'undefined') window.__harness = harness;

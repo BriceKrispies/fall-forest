@@ -16,6 +16,7 @@ import { renderHorrors, renderHorrorDebug } from './horror-renderer.js';
 import { createDefaultRegistry } from './world/discoveries/index.js';
 import { SpawnLedger } from './world/generation/spawn-ledger.js';
 import { CollectionState } from './world/generation/collection-state.js';
+import { initHarness } from './harness.js';
 
 const RENDER_W = 320;
 const RENDER_H = 200;
@@ -309,6 +310,18 @@ async function start() {
     state.chunkSystem.update(x, z);
     return `teleported to ${x.toFixed(1)}, ${z.toFixed(1)}`;
   }, 'Teleport to (x, z)');
+
+  // Register /harness command — exposes window.__harness with profilers.
+  let harnessRef = null;
+  commands.register('harness', () => {
+    if (!harnessRef) {
+      harnessRef = initHarness({
+        camera, renderer, chunkSystem, input,
+        RENDER_W, RENDER_H,
+      });
+    }
+    return 'harness ready — see window.__harness (movementProfile, chunkLoadCost, ...)';
+  }, 'Expose programmatic harness on window.__harness');
 
   // Register /discoveries command — summary of registry + collection state.
   //   /discoveries          — print summary
